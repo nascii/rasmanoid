@@ -7,6 +7,8 @@ const BAT_ACCEL: f64 = 500.;    // [px/sec]
 const BAT_BRAKING: f64 = 0.98;
 
 const BALL_RADIUS: f64 = 20.;   // [px]
+const BALL_BRAKING: f64 = 0.9;
+const BALL_ACCEL: f64 = 1.05;
 
 pub struct State {
     shape: (f64, f64),
@@ -93,8 +95,28 @@ fn collide_with_walls(mut ball: Ball, shape: (f64, f64)) -> (Ball, bool) {
     (ball, true)
 }
 
-fn collide_with_bat(ball: Ball, bat_x: f64, bat_v: f64) -> Ball {
-    // TODO
+fn collide_with_bat(mut ball: Ball, bat_x: f64, bat_v: f64) -> Ball {
+    // TODO: the corner case.
+
+    let by = BAT_Y + 0.5 * BAT_HEIGHT;
+    let bx0 = bat_x - 0.5 * BAT_WIDTH;
+    let bx1 = bat_x + 0.5 * BAT_WIDTH;
+
+    if !(ball.y - BALL_RADIUS <= by && bx0 <= ball.x && ball.x <= bx1) {
+        return ball;
+    }
+
+    ball.vy = -ball.vy;
+
+    if bat_v * ball.vx > 0. {
+        ball.vx /= BALL_BRAKING;
+    } else {
+        ball.vx *= BALL_BRAKING;
+    }
+
+    ball.vx *= BALL_ACCEL;
+    ball.vy *= BALL_ACCEL;
+
     ball
 }
 
