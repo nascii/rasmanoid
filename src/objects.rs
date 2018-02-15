@@ -10,8 +10,10 @@ pub struct Bat {
 }
 
 pub const BALL_RADIUS: f64 = 10.;   // [px]
-pub const BALL_BRAKING: f64 = 0.9;
+pub const BALL_BRAKING: f64 = 0.6;
 pub const BALL_ACCEL: f64 = 1.05;
+pub const BALL_DEF_VX: f64 = 30.;
+pub const BALL_DEF_VY: f64 = 300.;
 
 pub struct Ball {
     pub x: f64,

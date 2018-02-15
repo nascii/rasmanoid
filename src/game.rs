@@ -8,7 +8,13 @@ pub struct State {
     map: Map,
     bat: Bat,
     ball: Ball,
-    failed: bool,
+    status: Status,
+}
+
+enum Status {
+    NotStarted,
+    Started,
+    Failed,
 }
 
 impl State {
@@ -22,11 +28,11 @@ impl State {
             ball: Ball {
                 // TODO: randomize the velocity.
                 x: 0.5 * WIDTH,
-                y: 0.5 * HEIGHT,
-                vx: 300.,
-                vy: 230.,
+                y: BAT_Y + 0.5 * BAT_HEIGHT + BALL_RADIUS,
+                vx: 0.,
+                vy: 0.,
             },
-            failed: false,
+            status: Status::NotStarted,
         }
     }
 }
@@ -40,10 +46,25 @@ pub struct Input {
 // SIMULATE
 
 pub fn simulate(state: State, input: Input) -> State {
-    if state.failed {
-        return state;
+    match state.status {
+        Status::NotStarted => waiting(state, input),
+        Status::Started => flying(state, input),
+        Status::Failed => state,
+    }
+}
+
+fn waiting(mut state: State, input: Input) -> State {
+    if input.left || input.right {
+        state.ball.vx = if input.left { -BALL_DEF_VX } else { BALL_DEF_VX };
+        state.ball.vy = BALL_DEF_VY;
+
+        state.status = Status::Started;
     }
 
+    state
+}
+
+fn flying(state: State, input: Input) -> State {
     let bat_a = if input.left { -BAT_ACCEL } else if input.right { BAT_ACCEL } else { 0. };
     let bat_v = BAT_BRAKING * (state.bat.v + bat_a * input.dt);
     let bat_x = (0.5 * BAT_WIDTH).max(state.bat.x + bat_v * input.dt).min(WIDTH - 0.5 * BAT_WIDTH);
@@ -70,7 +91,7 @@ pub fn simulate(state: State, input: Input) -> State {
         map,
         bat,
         ball,
-        failed,
+        status: if failed { Status::Failed } else { state.status },
     }
 }
 
@@ -252,7 +273,7 @@ pub fn render(ctx: &CanvasRenderingContext2d, state: &State) {
             c.fillRect(blocks[i].x - 0.5 * bw, blocks[i].y - 0.5 * bh, bw, bh);
     }
 
-    if state.failed {
+    if let Status::Failed = state.status {
         let text_x = 0.2 * WIDTH;
         let text_y = 0.5 * HEIGHT;
 
