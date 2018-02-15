@@ -95,9 +95,13 @@ fn main() {
     canvas.set_width(WIDTH);
     canvas.set_height(HEIGHT);
 
-    let state = State::new(WIDTH, HEIGHT);
-
     let ctx: CanvasRenderingContext2d = canvas.get_context().unwrap();
+
+    js! {
+        @{canvas}.style = "border: 1px solid gray";
+    }
+
+    let state = State::new(WIDTH, HEIGHT);
 
     let env = Rc::new(RefCell::new(EnvInner {
         left: false,

@@ -6,7 +6,7 @@ const BAT_HEIGHT: f64 = 60.;    // [px]
 const BAT_ACCEL: f64 = 500.;    // [px/sec]
 const BAT_BRAKING: f64 = 0.98;
 
-const BALL_RADIUS: f64 = 30.;   // [px]
+const BALL_RADIUS: f64 = 20.;   // [px]
 
 pub struct State {
     shape: (f64, f64),
