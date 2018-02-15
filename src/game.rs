@@ -1,8 +1,8 @@
 use stdweb::web::{CanvasRenderingContext2d};
 
-const BAT_WIDTH: f64 = 80.;    // [px]
-const BAT_Y: f64 = 60.;         // [px]
-const BAT_HEIGHT: f64 = 60.;    // [px]
+const BAT_Y: f64 = 15.;         // [px]
+const BAT_WIDTH: f64 = 80.;     // [px]
+const BAT_HEIGHT: f64 = 20.;    // [px]
 const BAT_ACCEL: f64 = 500.;    // [px/sec]
 const BAT_BRAKING: f64 = 0.98;
 
@@ -50,7 +50,7 @@ pub fn render(ctx: &CanvasRenderingContext2d, state: &State) {
     let (win_w, win_h) = state.shape;
 
     let bat_x = state.bat_x - 0.5 * BAT_WIDTH;
-    let bat_y = state.shape.1 - BAT_Y + 0.5 * BAT_HEIGHT;
+    let bat_y = BAT_Y - 0.5 * BAT_HEIGHT;
 
     let ball_x = 300;
     let ball_y = 300;
@@ -58,13 +58,16 @@ pub fn render(ctx: &CanvasRenderingContext2d, state: &State) {
     js! {
         var c = @{ctx};
 
-        // Clear.
+        // Normalize the coordinate system.
+        c.setTransform(1, 0, 0, -1, 0, @{win_h});
+
+        // Clear the canvas.
         c.clearRect(0, 0, @{win_w}, @{win_h});
 
-        // Draw bat.
+        // Draw the bat.
         c.fillRect(@{bat_x}, @{bat_y}, @{BAT_WIDTH}, @{BAT_HEIGHT});
 
-        // Draw ball.
+        // Draw the ball.
         c.beginPath();
         c.arc(@{ball_x}, @{ball_y}, @{BALL_RADIUS}, 0, 2 * Math.PI, false);
         c.lineWidth = 2;
