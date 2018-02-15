@@ -6,7 +6,7 @@ const BAT_HEIGHT: f64 = 20.;    // [px]
 const BAT_ACCEL: f64 = 500.;    // [px/sec]
 const BAT_BRAKING: f64 = 0.98;
 
-const BALL_RADIUS: f64 = 20.;   // [px]
+const BALL_RADIUS: f64 = 10.;   // [px]
 const BALL_BRAKING: f64 = 0.9;
 const BALL_ACCEL: f64 = 1.05;
 
@@ -44,8 +44,8 @@ impl State {
                 // TODO: randomize the velocity.
                 x: 0.5 * width,
                 y: 0.5 * height,
-                vx: 200.,
-                vy: 180.,
+                vx: 300.,
+                vy: 230.,
             },
             failed: false,
         }
