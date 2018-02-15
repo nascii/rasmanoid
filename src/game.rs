@@ -12,10 +12,14 @@ const BALL_ACCEL: f64 = 1.05;
 
 pub struct State {
     shape: (f64, f64),
-    bat_x: f64,
-    bat_v: f64,
+    bat: Bat,
     ball: Ball,
     failed: bool,
+}
+
+struct Bat {
+    x: f64,
+    v: f64,
 }
 
 struct Ball {
@@ -32,8 +36,10 @@ impl State {
 
         State {
             shape: (width, height),
-            bat_x: 0.5 * width,
-            bat_v: 0.,
+            bat: Bat {
+                x: 0.5 * width,
+                v: 0.,
+            },
             ball: Ball {
                 // TODO: randomize the velocity.
                 x: 0.5 * width,
@@ -60,10 +66,15 @@ pub fn simulate(state: State, input: Input) -> State {
     }
 
     let bat_a = if input.left { -BAT_ACCEL } else if input.right { BAT_ACCEL } else { 0. };
-    let bat_v = BAT_BRAKING * (state.bat_v + bat_a * input.dt);
-    let bat_x = (0.5 * BAT_WIDTH).max(state.bat_x + bat_v * input.dt).min(state.shape.0 - 0.5 * BAT_WIDTH);
+    let bat_v = BAT_BRAKING * (state.bat.v + bat_a * input.dt);
+    let bat_x = (0.5 * BAT_WIDTH).max(state.bat.x + bat_v * input.dt).min(state.shape.0 - 0.5 * BAT_WIDTH);
 
-    let ball = collide_with_bat(state.ball, bat_x, bat_v);
+    let bat = Bat {
+        x: bat_x,
+        v: bat_v,
+    };
+
+    let ball = collide_with_bat(state.ball, &bat);
     let failed = collide_with_danger_zone(&ball);
     let mut ball = collide_with_walls(ball, state.shape);
 
@@ -72,8 +83,7 @@ pub fn simulate(state: State, input: Input) -> State {
 
     State {
         shape: state.shape,
-        bat_x,
-        bat_v,
+        bat,
         ball,
         failed,
     }
@@ -98,12 +108,12 @@ fn collide_with_danger_zone(ball: &Ball) -> bool {
     ball.y - BALL_RADIUS <= 0.
 }
 
-fn collide_with_bat(mut ball: Ball, bat_x: f64, bat_v: f64) -> Ball {
+fn collide_with_bat(mut ball: Ball, bat: &Bat) -> Ball {
     // TODO: the corner case.
 
     let by = BAT_Y + 0.5 * BAT_HEIGHT;
-    let bx0 = bat_x - 0.5 * BAT_WIDTH;
-    let bx1 = bat_x + 0.5 * BAT_WIDTH;
+    let bx0 = bat.x - 0.5 * BAT_WIDTH;
+    let bx1 = bat.x + 0.5 * BAT_WIDTH;
 
     if !(ball.y - BALL_RADIUS <= by && bx0 <= ball.x && ball.x <= bx1) {
         return ball;
@@ -111,7 +121,7 @@ fn collide_with_bat(mut ball: Ball, bat_x: f64, bat_v: f64) -> Ball {
 
     ball.vy = -ball.vy;
 
-    if bat_v * ball.vx > 0. {
+    if bat.v * ball.vx > 0. {
         ball.vx /= BALL_BRAKING;
     } else {
         ball.vx *= BALL_BRAKING;
@@ -128,7 +138,7 @@ fn collide_with_bat(mut ball: Ball, bat_x: f64, bat_v: f64) -> Ball {
 pub fn render(ctx: &CanvasRenderingContext2d, state: &State) {
     let (win_w, win_h) = state.shape;
 
-    let bat_x = state.bat_x - 0.5 * BAT_WIDTH;
+    let bat_x = state.bat.x - 0.5 * BAT_WIDTH;
     let bat_y = BAT_Y - 0.5 * BAT_HEIGHT;
 
     let Ball {x: ball_x, y: ball_y, ..} = state.ball;
