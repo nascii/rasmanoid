@@ -1,7 +1,7 @@
 pub const BAT_Y: f64 = 15.;         // [px]
 pub const BAT_WIDTH: f64 = 80.;     // [px]
 pub const BAT_HEIGHT: f64 = 20.;    // [px]
-pub const BAT_ACCEL: f64 = 500.;    // [px/sec]
+pub const BAT_ACCEL: f64 = 700.;    // [px/sec]
 pub const BAT_BRAKING: f64 = 0.98;
 
 pub struct Bat {

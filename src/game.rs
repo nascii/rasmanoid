@@ -1,3 +1,4 @@
+use std::f64::consts::FRAC_1_SQRT_2;
 use stdweb::web::{CanvasRenderingContext2d};
 
 use objects::*;
@@ -54,13 +55,19 @@ pub fn simulate(state: State, input: Input) -> State {
 
     let ball = collide_with_bat(state.ball, &bat);
     let failed = collide_with_danger_zone(&ball);
-    let mut ball = collide_with_walls(ball);
+    let ball = collide_with_walls(ball);
+
+    let (mut ball, map) = if ball.y > 0.5 * HEIGHT {
+        collide_with_blocks(ball, state.map)
+    } else {
+        (ball, state.map)
+    };
 
     ball.x += ball.vx * input.dt;
     ball.y += ball.vy * input.dt;
 
     State {
-        map: state.map,
+        map,
         bat,
         ball,
         failed,
@@ -116,6 +123,98 @@ fn collide_with_bat(mut ball: Ball, bat: &Bat) -> Ball {
     ball.vy *= BALL_ACCEL;
 
     ball
+}
+
+fn collide_with_blocks(mut ball: Ball, mut map: Map) -> (Ball, Map) {
+    let mut remove_idx = None;
+
+    for (idx, block) in map.iter().enumerate() {
+        let (new_ball, detected) = collide_with_block(ball, &block);
+
+        ball = new_ball;
+
+        if detected {
+            remove_idx = Some(idx);
+            break;
+        }
+    }
+
+    if let Some(idx) = remove_idx {
+        map.swap_remove(idx);
+    }
+
+    (ball, map)
+}
+
+fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
+
+    /*   C₁ |   A₁  |  C₂
+     * -----#########-----
+     *   B₁ #########  B₂
+     * -----#########-----
+     *   C₄ |   A₂  |  C₃
+     */
+
+    let left = block.x - 0.5 * BLOCK_WIDTH;
+    let right = block.x + 0.5 * BLOCK_WIDTH;
+    let bottom = block.y - 0.5 * BLOCK_HEIGHT;
+    let top = block.y + 0.5 * BLOCK_HEIGHT;
+
+    let mut detected = true;
+
+    if left <= ball.x && ball.x <= right { // A
+        if ball.vy > 0. && ball.y <= top && ball.y + BALL_RADIUS >= bottom { // A₂
+            ball.vy = -ball.vy;
+            ball.y = bottom - BALL_RADIUS;
+        } else if ball.vy < 0. && ball.y >= bottom && ball.y - BALL_RADIUS <= top { // A₁
+            ball.vy = -ball.vy;
+            ball.y = top + BALL_RADIUS;
+        } else {
+            detected = false;
+        }
+    } else if bottom <= ball.y && ball.y <= top { // B
+        if ball.vx > 0. && ball.x <= right && ball.x + BALL_RADIUS >= left { // B₁
+            ball.vx = -ball.vx;
+            ball.x = left - BALL_RADIUS;
+        } else if ball.vx < 0. && ball.x >= left && ball.x - BALL_RADIUS <= right { // B₂
+            ball.vx = -ball.vx;
+            ball.x = right + BALL_RADIUS;
+        } else {
+            detected = false;
+        }
+    } else { // C
+        let bx = ball.x - block.x;
+        let by = ball.y - block.y;
+
+        let abx = bx.abs();
+        let aby = by.abs();
+
+        let dist2 = (right - abx) * (right - abx) + (top - aby) * (top - aby);
+
+        detected = dist2 < BALL_RADIUS * BALL_RADIUS;
+
+        if detected {
+            let norm_x = FRAC_1_SQRT_2 * bx.signum();
+            let norm_y = FRAC_1_SQRT_2 * by.signum();
+
+            let (vx, vy) = reflect((ball.vx, ball.vy), (norm_x, norm_y));
+
+            ball.vx = vx;
+            ball.vy = vy;
+        }
+    }
+
+    (ball, detected)
+}
+
+// pos + norm * 2(pos, norm)
+fn reflect(pos: (f64, f64), norm: (f64, f64)) -> (f64, f64) {
+    let dot = pos.0 * norm.0 + pos.1 * norm.1;
+
+    (
+        pos.0 + 2. * dot * norm.0,
+        pos.1 + 2. * dot * norm.1
+    )
 }
 
 // RENDER
