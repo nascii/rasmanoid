@@ -93,12 +93,19 @@ fn collide_with_walls(mut ball: Ball, shape: (f64, f64)) -> Ball {
     let (w, h) = shape;
     let r = BALL_RADIUS;
 
-    if ball.x + r >= w || ball.x - r <= 0. {
+    if ball.x + r >= w {
         ball.vx = -ball.vx;
+        ball.x = w - r;
+    }
+
+    if ball.x - r <= 0. {
+        ball.vx = -ball.vx;
+        ball.x = r;
     }
 
     if ball.y + r >= h {
         ball.vy = -ball.vy;
+        ball.y = h - r;
     }
 
     ball
@@ -115,11 +122,14 @@ fn collide_with_bat(mut ball: Ball, bat: &Bat) -> Ball {
     let bx0 = bat.x - 0.5 * BAT_WIDTH;
     let bx1 = bat.x + 0.5 * BAT_WIDTH;
 
-    if !(ball.y - BALL_RADIUS <= by && bx0 <= ball.x && ball.x <= bx1) {
+    let r = 0.95 * BALL_RADIUS;
+
+    if !(ball.y - r <= by && bx0 <= ball.x && ball.x <= bx1) {
         return ball;
     }
 
     ball.vy = -ball.vy;
+    ball.y = by + r;
 
     if bat.v * ball.vx > 0. {
         ball.vx /= BALL_BRAKING;
