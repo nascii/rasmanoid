@@ -1,49 +1,27 @@
 use stdweb::web::{CanvasRenderingContext2d};
 
-const BAT_Y: f64 = 15.;         // [px]
-const BAT_WIDTH: f64 = 80.;     // [px]
-const BAT_HEIGHT: f64 = 20.;    // [px]
-const BAT_ACCEL: f64 = 500.;    // [px/sec]
-const BAT_BRAKING: f64 = 0.98;
-
-const BALL_RADIUS: f64 = 10.;   // [px]
-const BALL_BRAKING: f64 = 0.9;
-const BALL_ACCEL: f64 = 1.05;
+use objects::*;
+use maps::{Map, WIDTH, HEIGHT};
 
 pub struct State {
-    shape: (f64, f64),
+    map: Map,
     bat: Bat,
     ball: Ball,
     failed: bool,
 }
 
-struct Bat {
-    x: f64,
-    v: f64,
-}
-
-struct Ball {
-    x: f64,
-    y: f64,
-    vx: f64,
-    vy: f64,
-}
-
 impl State {
-    pub fn new(width: u32, height: u32) -> State {
-        let width = width as f64;
-        let height = height as f64;
-
+    pub fn new(map: Map) -> State {
         State {
-            shape: (width, height),
+            map,
             bat: Bat {
-                x: 0.5 * width,
+                x: 0.5 * WIDTH,
                 v: 0.,
             },
             ball: Ball {
                 // TODO: randomize the velocity.
-                x: 0.5 * width,
-                y: 0.5 * height,
+                x: 0.5 * WIDTH,
+                y: 0.5 * HEIGHT,
                 vx: 300.,
                 vy: 230.,
             },
@@ -67,7 +45,7 @@ pub fn simulate(state: State, input: Input) -> State {
 
     let bat_a = if input.left { -BAT_ACCEL } else if input.right { BAT_ACCEL } else { 0. };
     let bat_v = BAT_BRAKING * (state.bat.v + bat_a * input.dt);
-    let bat_x = (0.5 * BAT_WIDTH).max(state.bat.x + bat_v * input.dt).min(state.shape.0 - 0.5 * BAT_WIDTH);
+    let bat_x = (0.5 * BAT_WIDTH).max(state.bat.x + bat_v * input.dt).min(WIDTH - 0.5 * BAT_WIDTH);
 
     let bat = Bat {
         x: bat_x,
@@ -76,36 +54,33 @@ pub fn simulate(state: State, input: Input) -> State {
 
     let ball = collide_with_bat(state.ball, &bat);
     let failed = collide_with_danger_zone(&ball);
-    let mut ball = collide_with_walls(ball, state.shape);
+    let mut ball = collide_with_walls(ball);
 
     ball.x += ball.vx * input.dt;
     ball.y += ball.vy * input.dt;
 
     State {
-        shape: state.shape,
+        map: state.map,
         bat,
         ball,
         failed,
     }
 }
 
-fn collide_with_walls(mut ball: Ball, shape: (f64, f64)) -> Ball {
-    let (w, h) = shape;
-    let r = BALL_RADIUS;
-
-    if ball.x + r >= w {
+fn collide_with_walls(mut ball: Ball) -> Ball {
+    if ball.x + BALL_RADIUS >= WIDTH {
         ball.vx = -ball.vx;
-        ball.x = w - r;
+        ball.x = WIDTH - BALL_RADIUS;
     }
 
-    if ball.x - r <= 0. {
+    if ball.x - BALL_RADIUS <= 0. {
         ball.vx = -ball.vx;
-        ball.x = r;
+        ball.x = BALL_RADIUS;
     }
 
-    if ball.y + r >= h {
+    if ball.y + BALL_RADIUS >= HEIGHT {
         ball.vy = -ball.vy;
-        ball.y = h - r;
+        ball.y = HEIGHT - BALL_RADIUS;
     }
 
     ball
@@ -146,8 +121,6 @@ fn collide_with_bat(mut ball: Ball, bat: &Bat) -> Ball {
 // RENDER
 
 pub fn render(ctx: &CanvasRenderingContext2d, state: &State) {
-    let (win_w, win_h) = state.shape;
-
     let bat_x = state.bat.x - 0.5 * BAT_WIDTH;
     let bat_y = BAT_Y - 0.5 * BAT_HEIGHT;
 
@@ -157,10 +130,10 @@ pub fn render(ctx: &CanvasRenderingContext2d, state: &State) {
         var c = @{ctx};
 
         // Normalize the coordinate system.
-        c.setTransform(1, 0, 0, -1, 0, @{win_h});
+        c.setTransform(1, 0, 0, -1, 0, @{HEIGHT});
 
         // Clear the canvas.
-        c.clearRect(0, 0, @{win_w}, @{win_h});
+        c.clearRect(0, 0, @{WIDTH}, @{HEIGHT});
 
         // Draw the bat.
         c.fillRect(@{bat_x}, @{bat_y}, @{BAT_WIDTH}, @{BAT_HEIGHT});
@@ -170,11 +143,19 @@ pub fn render(ctx: &CanvasRenderingContext2d, state: &State) {
         c.arc(@{ball_x}, @{ball_y}, @{BALL_RADIUS}, 0, 2 * Math.PI, false);
         c.lineWidth = 2;
         c.stroke();
+
+        // Draw blocks.
+        var blocks = @{&state.map};
+        var bw = @{BLOCK_WIDTH};
+        var bh = @{BLOCK_HEIGHT};
+
+        for (var i = 0; i < blocks.length; ++i)
+            c.fillRect(blocks[i].x - 0.5 * bw, blocks[i].y - 0.5 * bh, bw, bh);
     }
 
     if state.failed {
-        let text_x = 0.2 * win_w;
-        let text_y = 0.5 * win_h;
+        let text_x = 0.2 * WIDTH;
+        let text_y = 0.5 * HEIGHT;
 
         js! { @(no_return)
             @{ctx}.setTransform(1, 0, 0, 1, 0, 0);

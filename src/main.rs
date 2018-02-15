@@ -1,7 +1,10 @@
-#![recursion_limit="128"]
+#![recursion_limit="256"]
 
 #[macro_use]
 extern crate stdweb;
+
+#[macro_use]
+extern crate serde_derive;
 
 use std::rc::Rc;
 use std::cell::RefCell;
@@ -13,11 +16,11 @@ use stdweb::web::event::{KeyDownEvent, KeyUpEvent, IKeyboardEvent};
 use stdweb::web::html_element::CanvasElement;
 
 use game::{State, Input};
+use maps::{WIDTH, HEIGHT};
 
 mod game;
-
-const WIDTH: u32 = 600;
-const HEIGHT: u32 = 800;
+mod maps;
+mod objects;
 
 struct EnvInner {
     left: bool,
@@ -92,8 +95,8 @@ fn main() {
 
     body.append_child(&canvas);
 
-    canvas.set_width(WIDTH);
-    canvas.set_height(HEIGHT);
+    canvas.set_width(WIDTH as u32);
+    canvas.set_height(HEIGHT as u32);
 
     let ctx: CanvasRenderingContext2d = canvas.get_context().unwrap();
 
@@ -101,7 +104,10 @@ fn main() {
         @{canvas}.style = "border: 1px solid gray";
     }
 
-    let state = State::new(WIDTH, HEIGHT);
+    let mut maps = maps::generate_maps();
+    let map = maps.swap_remove(0);
+
+    let state = State::new(map);
 
     let env = Rc::new(RefCell::new(EnvInner {
         left: false,

@@ -5,3 +5,5 @@ authors = ["lol kek"]
 
 [dependencies]
 stdweb = { git = "https://github.com/koute/stdweb" }
+serde = "^1"
+serde_derive = "^1"
