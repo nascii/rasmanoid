@@ -1,19 +1,25 @@
 use stdweb::web::{CanvasRenderingContext2d};
 
-const BAT_WIDTH_DEFAULT: f64 = 0.3;
+const BAT_WIDTH: f64 = 80.;    // [px]
+const BAT_Y: f64 = 60.;         // [px]
+const BAT_HEIGHT: f64 = 60.;    // [px]
+const BAT_ACCEL: f64 = 500.;    // [px/sec]
+const BAT_BRAKING: f64 = 0.98;
+
+const BALL_RADIUS: f64 = 30.;   // [px]
 
 pub struct State {
+    shape: (f64, f64),
     bat_x: f64,
     bat_v: f64,
-    bat_w: f64,
 }
 
 impl State {
-    pub fn new() -> State {
+    pub fn new(width: u32, height: u32) -> State {
         State {
-            bat_x: 0.5,
+            shape: (width as f64, height as f64),
+            bat_x: 300.,
             bat_v: 0.,
-            bat_w: BAT_WIDTH_DEFAULT,
         }
     }
 }
@@ -24,63 +30,44 @@ pub struct Input {
     pub right: bool,
 }
 
-pub struct Context {
-    pub ctx: CanvasRenderingContext2d,
-    pub width: f64,
-    pub height: f64,
-}
-
 // SIMULATE
 
 pub fn simulate(state: State, input: Input) -> State {
-    let dv = if input.left { -0.02 } else if input.right { 0.02 } else { 0. };
-
-    let dx = state.bat_v * input.dt;
+    let bat_a = if input.left { -BAT_ACCEL } else if input.right { BAT_ACCEL } else { 0. };
+    let bat_v = BAT_BRAKING * (state.bat_v + bat_a * input.dt);
+    let bat_x = (0.5 * BAT_WIDTH).max(state.bat_x + bat_v * input.dt).min(state.shape.0 - 0.5 * BAT_WIDTH);
 
     State {
-        bat_x: (0.5 * state.bat_w).max(state.bat_x + dx).min(1. - 0.5 * state.bat_w),
-        bat_v: 0.98 * (state.bat_v + dv),
-        bat_w: state.bat_w,
+        shape: state.shape,
+        bat_x,
+        bat_v,
     }
 }
 
 // RENDER
 
-pub fn render(context: &Context, state: &State) {
-    clear(context);
-    draw_rect(context, state.bat_x, 0.1, state.bat_w, 0.1);
-    draw_circle(context, 0.5, 0.5, 0.05);
-}
+pub fn render(ctx: &CanvasRenderingContext2d, state: &State) {
+    let (win_w, win_h) = state.shape;
 
-fn clear(context: &Context) {
-    let ctx = &context.ctx;
+    let bat_x = state.bat_x - 0.5 * BAT_WIDTH;
+    let bat_y = state.shape.1 - BAT_Y + 0.5 * BAT_HEIGHT;
 
-    js! { @{ctx}.clearRect(0, 0, @{context.width}, @{context.height}) }
-}
-
-fn draw_rect(context: &Context, x: f64, y: f64, w: f64, h: f64) {
-    let hw = 0.5 * w;
-    let hh = 0.5 * h;
-
-    context.ctx.fill_rect(
-        (x - hw) * context.width,
-        (1. - y + hh) * context.height,
-        w * context.width,
-        h * context.height
-    );
-}
-
-fn draw_circle(context: &Context, x: f64, y: f64, r: f64) {
-    let ctx = &context.ctx;
-
-    let x = x * context.width;
-    let y = y * context.height;
-    let r = r * context.width;
+    let ball_x = 300;
+    let ball_y = 300;
 
     js! {
-        @{ctx}.beginPath();
-        @{ctx}.arc(@{x}, @{y}, @{r}, 0, 2 * Math.PI, false);
-        @{ctx}.lineWidth = 2;
-        @{ctx}.stroke();
+        var c = @{ctx};
+
+        // Clear.
+        c.clearRect(0, 0, @{win_w}, @{win_h});
+
+        // Draw bat.
+        c.fillRect(@{bat_x}, @{bat_y}, @{BAT_WIDTH}, @{BAT_HEIGHT});
+
+        // Draw ball.
+        c.beginPath();
+        c.arc(@{ball_x}, @{ball_y}, @{BALL_RADIUS}, 0, 2 * Math.PI, false);
+        c.lineWidth = 2;
+        c.stroke();
     }
 }

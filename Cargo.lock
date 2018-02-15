@@ -53,6 +53,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "rasmanoid"
+version = "0.0.1"
+dependencies = [
+ "stdweb 0.3.0 (git+https://github.com/koute/stdweb)",
+]
+
+[[package]]
 name = "serde"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -160,13 +167,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "unicode-xid"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-
-[[package]]
-name = "wasm-test"
-version = "0.1.0"
-dependencies = [
- "stdweb 0.3.0 (git+https://github.com/koute/stdweb)",
-]
 
 [metadata]
 "checksum base-x 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "2f59103b47307f76e03bef1633aec7fa9e29bfb5aa6daf5a334f94233c71f6c1"

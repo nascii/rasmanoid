@@ -1,37 +1,55 @@
+#![recursion_limit="128"]
+
 #[macro_use]
 extern crate stdweb;
 
 use std::rc::Rc;
-use std::cell::Cell;
+use std::cell::RefCell;
 
 use stdweb::web;
 use stdweb::unstable::TryInto;
-use stdweb::web::{IParentNode, INode, IEventTarget};
+use stdweb::web::{IParentNode, INode, IEventTarget, CanvasRenderingContext2d};
 use stdweb::web::event::{KeyDownEvent, KeyUpEvent, IKeyboardEvent};
 use stdweb::web::html_element::CanvasElement;
 
-use game::{State, Input, Context};
+use game::{State, Input};
 
 mod game;
 
 const WIDTH: u32 = 600;
 const HEIGHT: u32 = 800;
 
-fn timer(state: State, ctx: Context, left: Rc<Cell<bool>>, right: Rc<Cell<bool>>, prev_ts: f64) {
+struct EnvInner {
+    left: bool,
+    right: bool,
+    timestamp: f64,
+}
+
+type Env = Rc<RefCell<EnvInner>>;
+
+fn timer(state: State, ctx: CanvasRenderingContext2d, env: Env) {
     let window = web::window();
 
     window.request_animation_frame(move |ts| {
-        let dt = if prev_ts == 0. { 0. } else { ts - prev_ts };
+        let state = {
+            let mut e = env.borrow_mut();
 
-        let state = game::simulate(state, Input {
-            dt: dt * 0.001,
-            left: left.get(),
-            right: right.get()
-        });
+            let dt = if e.timestamp == 0. { 0. } else { ts - e.timestamp };
 
-        game::render(&ctx, &state);
+            e.timestamp = ts;
 
-        timer(state, ctx, left, right, ts);
+            let state = game::simulate(state, Input {
+                dt: dt * 0.001,
+                left: e.left,
+                right: e.right,
+            });
+
+            game::render(&ctx, &state);
+
+            state
+        };
+
+        timer(state, ctx, env);
     });
 }
 
@@ -44,21 +62,21 @@ macro_rules! enclose {
     };
 }
 
-fn keyboard(left: Rc<Cell<bool>>, right: Rc<Cell<bool>>) {
+fn keyboard(env: Env) {
     let window = web::window();
 
-    window.add_event_listener(enclose!( (left, right) move |ev: KeyDownEvent| {
+    window.add_event_listener(enclose!( (env) move |ev: KeyDownEvent| {
         match ev.key().as_str() {
-            "ArrowRight" => right.set(true),
-            "ArrowLeft" => left.set(true),
+            "ArrowRight" => env.borrow_mut().right = true,
+            "ArrowLeft" => env.borrow_mut().left = true,
             _ => {},
         };
     }));
 
-    window.add_event_listener(enclose!( (left, right) move |ev: KeyUpEvent| {
+    window.add_event_listener(enclose!( (env) move |ev: KeyUpEvent| {
         match ev.key().as_str() {
-            "ArrowRight" => right.set(false),
-            "ArrowLeft" => left.set(false),
+            "ArrowRight" => env.borrow_mut().right = false,
+            "ArrowLeft" => env.borrow_mut().left = false,
             _ => {},
         };
     }));
@@ -77,18 +95,18 @@ fn main() {
     canvas.set_width(WIDTH);
     canvas.set_height(HEIGHT);
 
-    let state = State::new();
-    let left = Rc::new(Cell::new(false));
-    let right = Rc::new(Cell::new(false));
+    let state = State::new(WIDTH, HEIGHT);
 
-    let ctx = Context {
-        ctx: canvas.get_context().unwrap(),
-        width: WIDTH as f64,
-        height: HEIGHT as f64,
-    };
+    let ctx: CanvasRenderingContext2d = canvas.get_context().unwrap();
 
-    timer(state, ctx, left.clone(), right.clone(), 0.);
-    keyboard(left, right);
+    let env = Rc::new(RefCell::new(EnvInner {
+        left: false,
+        right: false,
+        timestamp: 0.,
+    }));
+
+    timer(state, ctx, env.clone());
+    keyboard(env);
 
     stdweb::event_loop();
 }
