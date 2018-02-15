@@ -64,7 +64,8 @@ pub fn simulate(state: State, input: Input) -> State {
     let bat_x = (0.5 * BAT_WIDTH).max(state.bat_x + bat_v * input.dt).min(state.shape.0 - 0.5 * BAT_WIDTH);
 
     let ball = collide_with_bat(state.ball, bat_x, bat_v);
-    let (mut ball, succ) = collide_with_walls(ball, state.shape);
+    let failed = collide_with_danger_zone(&ball);
+    let mut ball = collide_with_walls(ball, state.shape);
 
     ball.x += ball.vx * input.dt;
     ball.y += ball.vy * input.dt;
@@ -74,11 +75,11 @@ pub fn simulate(state: State, input: Input) -> State {
         bat_x,
         bat_v,
         ball,
-        failed: !succ,
+        failed,
     }
 }
 
-fn collide_with_walls(mut ball: Ball, shape: (f64, f64)) -> (Ball, bool) {
+fn collide_with_walls(mut ball: Ball, shape: (f64, f64)) -> Ball {
     let (w, h) = shape;
     let r = BALL_RADIUS;
 
@@ -88,11 +89,13 @@ fn collide_with_walls(mut ball: Ball, shape: (f64, f64)) -> (Ball, bool) {
 
     if ball.y + r >= h {
         ball.vy = -ball.vy;
-    } else if ball.y - r <= 0. {
-        return (ball, false)
     }
 
-    (ball, true)
+    ball
+}
+
+fn collide_with_danger_zone(ball: &Ball) -> bool {
+    ball.y - BALL_RADIUS <= 0.
 }
 
 fn collide_with_bat(mut ball: Ball, bat_x: f64, bat_v: f64) -> Ball {
