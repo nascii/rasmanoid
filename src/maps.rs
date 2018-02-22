@@ -14,7 +14,7 @@ const MAPS: &str = include_str!("maps.txt");
 pub type Map = Vec<Block>;
 
 pub fn generate_maps() -> Vec<Map> {
-    MAPS.split("\n---\n")
+    MAPS.split("---")
         .map(generate_map)
         .collect()
 }
