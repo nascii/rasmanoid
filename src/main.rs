@@ -105,7 +105,7 @@ fn main() {
     }
 
     let mut maps = maps::generate_maps();
-    let map = maps.swap_remove(0);
+    let map = maps.swap_remove(1);
 
     let state = State::new(map);
 
