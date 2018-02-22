@@ -215,17 +215,20 @@ fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
     } else { // C
         let bx = ball.x - block.x;
         let by = ball.y - block.y;
-        let real_dist2 = bx * bx + by * by;
 
-        let dx = 0.5 * BLOCK_WIDTH + BALL_RADIUS;
-        let dy = 0.5 * BLOCK_HEIGHT + BALL_RADIUS;
-        let closest_dist2 = dx * dx + dy * dy;
+        let abx = bx.abs();
+        let aby = by.abs();
 
-        detected = real_dist2 < closest_dist2;
+        let dx = 0.5 * BLOCK_WIDTH - abx;
+        let dy = 0.5 * BLOCK_HEIGHT - aby;
+
+        let dist2 = dx * dx + dy * dy;
+
+        detected = dist2 < BALL_RADIUS * BALL_RADIUS;
 
         if detected {
-            let norm_x = FRAC_1_SQRT_2 * bx.signum();
-            let norm_y = FRAC_1_SQRT_2 * by.signum();
+            let norm_x = (right - ball.x).abs() * bx.signum();
+            let norm_y = (top - ball.y).abs() * by.signum();
 
             let (vx, vy) = reflect((ball.vx, ball.vy), (norm_x, norm_y));
 
@@ -240,10 +243,11 @@ fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
 // pos - norm * 2(pos, norm)
 fn reflect(pos: (f64, f64), norm: (f64, f64)) -> (f64, f64) {
     let dot = pos.0 * norm.0 + pos.1 * norm.1;
+    let norm_l2 = norm.0 * norm.0 + norm.1 * norm.1;
 
     (
-        pos.0 - 2. * dot * norm.0,
-        pos.1 - 2. * dot * norm.1
+        pos.0 - 2. * dot * norm.0 / norm_l2,
+        pos.1 - 2. * dot * norm.1 / norm_l2
     )
 }
 
