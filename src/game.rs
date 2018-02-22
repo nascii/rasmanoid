@@ -1,4 +1,3 @@
-use std::f64::consts::FRAC_1_SQRT_2;
 use stdweb::web::{CanvasRenderingContext2d};
 
 use objects::*;
