@@ -66,8 +66,21 @@ fn waiting(mut state: State, input: Input) -> State {
 
 fn flying(state: State, input: Input) -> State {
     let bat_a = if input.left { -BAT_ACCEL } else if input.right { BAT_ACCEL } else { 0. };
-    let bat_v = BAT_BRAKING * (state.bat.v + bat_a * input.dt);
-    let bat_x = (0.5 * BAT_WIDTH).max(state.bat.x + bat_v * input.dt).min(WIDTH - 0.5 * BAT_WIDTH);
+    let mut bat_v = (-BAT_MAX_SPEED).max(BAT_BRAKING * (state.bat.v + bat_a * input.dt)).min(BAT_MAX_SPEED);
+
+    let mut bat_x = state.bat.x + bat_v * input.dt;
+    let min_bat_x = 0.5 * BAT_WIDTH;
+    let max_bat_x = WIDTH - 0.5 * BAT_WIDTH;
+
+    if bat_x < min_bat_x {
+        bat_x = min_bat_x;
+        bat_v = 0.0;
+    }
+
+    if bat_x > max_bat_x {
+        bat_x = max_bat_x;
+        bat_v = 0.0;
+    }
 
     let bat = Bat {
         x: bat_x,
@@ -134,11 +147,7 @@ fn collide_with_bat(mut ball: Ball, bat: &Bat) -> Ball {
     ball.vy = -ball.vy;
     ball.y = by + r;
 
-    if bat.v * ball.vx > 0. {
-        ball.vx /= BALL_BRAKING;
-    } else {
-        ball.vx *= BALL_BRAKING;
-    }
+    ball.vx += bat.v * BALL_BRAKING;
 
     ball.vx *= BALL_ACCEL;
     ball.vy *= BALL_ACCEL;
@@ -206,13 +215,13 @@ fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
     } else { // C
         let bx = ball.x - block.x;
         let by = ball.y - block.y;
+        let real_dist2 = bx * bx + by * by;
 
-        let abx = bx.abs();
-        let aby = by.abs();
+        let dx = 0.5 * BLOCK_WIDTH + BALL_RADIUS;
+        let dy = 0.5 * BLOCK_HEIGHT + BALL_RADIUS;
+        let closest_dist2 = dx * dx + dy * dy;
 
-        let dist2 = (right - abx) * (right - abx) + (top - aby) * (top - aby);
-
-        detected = dist2 < BALL_RADIUS * BALL_RADIUS;
+        detected = real_dist2 < closest_dist2;
 
         if detected {
             let norm_x = FRAC_1_SQRT_2 * bx.signum();
@@ -228,13 +237,13 @@ fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
     (ball, detected)
 }
 
-// pos + norm * 2(pos, norm)
+// pos - norm * 2(pos, norm)
 fn reflect(pos: (f64, f64), norm: (f64, f64)) -> (f64, f64) {
     let dot = pos.0 * norm.0 + pos.1 * norm.1;
 
     (
-        pos.0 + 2. * dot * norm.0,
-        pos.1 + 2. * dot * norm.1
+        pos.0 - 2. * dot * norm.0,
+        pos.1 - 2. * dot * norm.1
     )
 }
 

@@ -1,8 +1,9 @@
 pub const BAT_Y: f64 = 15.;         // [px]
 pub const BAT_WIDTH: f64 = 80.;     // [px]
 pub const BAT_HEIGHT: f64 = 20.;    // [px]
-pub const BAT_ACCEL: f64 = 700.;    // [px/sec]
+pub const BAT_ACCEL: f64 = 900.;    // [px/sec]
 pub const BAT_BRAKING: f64 = 0.98;
+pub const BAT_MAX_SPEED: f64 = 1700.0;  // [px/sec]
 
 pub struct Bat {
     pub x: f64,
@@ -10,8 +11,8 @@ pub struct Bat {
 }
 
 pub const BALL_RADIUS: f64 = 10.;   // [px]
-pub const BALL_BRAKING: f64 = 0.6;
-pub const BALL_ACCEL: f64 = 1.05;
+pub const BALL_BRAKING: f64 = 0.5;
+pub const BALL_ACCEL: f64 = 1.01;
 pub const BALL_DEF_VX: f64 = 30.;
 pub const BALL_DEF_VY: f64 = 300.;
 
