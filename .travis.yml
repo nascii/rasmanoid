@@ -6,7 +6,7 @@ cache: cargo
 script:
   - cargo install cargo-web
   - cargo web deploy
-  
+
  deploy:
   provider: pages
   skip-cleanup: true
@@ -15,3 +15,4 @@ script:
   local-dir: "target\deploy"
   on:
     branch: master
+
