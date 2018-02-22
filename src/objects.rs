@@ -1,6 +1,6 @@
 pub const BAT_Y: f64 = 15.;         // [px]
 pub const BAT_WIDTH: f64 = 80.;     // [px]
-pub const BAT_HEIGHT: f64 = 20.;    // [px]
+pub const BAT_HEIGHT: f64 = 8.;     // [px]
 pub const BAT_ACCEL: f64 = 900.;    // [px/sec]
 pub const BAT_BRAKING: f64 = 0.98;
 pub const BAT_MAX_SPEED: f64 = 1700.0;  // [px/sec]
