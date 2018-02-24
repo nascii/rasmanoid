@@ -4,6 +4,6 @@ version = "0.0.1"
 authors = ["lol kek"]
 
 [dependencies]
-stdweb = { git = "https://github.com/koute/stdweb" }
+stdweb = "^0.4.0"
 serde = "^1"
 serde_derive = "^1"
