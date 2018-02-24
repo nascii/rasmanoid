@@ -201,12 +201,9 @@ fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
              * (вообще нужно смотреть на предыдущее положение, но мы ограничимся скоростью)
              */
 
-            // скорость положительная -> шар подлетал снизу вверх -> выталкиваем вниз.
-            if ball.vy > 0. {
-                ball.y = ball_bottom;
-            } else {
-                ball.y = ball_top;
-            }
+            // TODO: искать настоящую точку пересечения прямых вектора скорости и top/bottom,
+            // а не выталкивать по перпендикуляру.
+            ball.y = if ball.vy > 0. { bottom - BALL_RADIUS } else { top + BALL_RADIUS };
             ball.vy = -ball.vy;
         } else {
             detected = false;
@@ -216,7 +213,7 @@ fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
         let ball_left = ball.x - BALL_RADIUS;
 
         if ball_right >= left && ball_left <= right {
-            ball.x = if ball.vx > 0. { ball_left } else { ball_right };
+            ball.x = if ball.vx > 0. { left - BALL_RADIUS } else { right + BALL_RADIUS };
             ball.vx = -ball.vx;
         } else {
             detected = false;
