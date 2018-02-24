@@ -184,6 +184,8 @@ Module.STDWEB_PRIVATE.to_js = function to_js( address ) {
             case 7:
                 return HEAPF64.subarray( pointer, pointer_end );
         }
+    } else if( kind === 15 ) {
+        return Module.STDWEB_PRIVATE.get_raw_value( HEAPU32[ address / 4 ] );
     }
 };
 
@@ -249,6 +251,10 @@ Module.STDWEB_PRIVATE.from_js = function from_js( address, value ) {
         HEAPU8[ address + 12 ] = 5;
     } else if( value === true ) {
         HEAPU8[ address + 12 ] = 6;
+    } else if( kind === "[object Symbol]" ) {
+        var id = Module.STDWEB_PRIVATE.register_raw_value( value );
+        HEAPU8[ address + 12 ] = 15;
+        HEAP32[ address / 4 ] = id;
     } else {
         var refid = Module.STDWEB_PRIVATE.acquire_rust_reference( value );
         HEAPU8[ address + 12 ] = 9;
@@ -288,6 +294,9 @@ Module.STDWEB_PRIVATE.to_js_string = function to_js_string( index, length ) {
                     w = HEAPU8[ index++ ];
                 }
                 ch = (init & 7) << 18 | ((y_z << 6) | (w & 63));
+
+                output += String.fromCharCode( 0xD7C0 + (ch >> 10) );
+                ch = 0xDC00 + (ch & 0x3FF);
             }
         }
         output += String.fromCharCode( ch );
@@ -296,59 +305,65 @@ Module.STDWEB_PRIVATE.to_js_string = function to_js_string( index, length ) {
     return output;
 };
 
-var id_to_ref_map = {};
-var id_to_refcount_map = {};
-var ref_to_id_map = new WeakMap();
-var ref_to_id_symbol_map = {};
-var last_refid = 1;
+Module.STDWEB_PRIVATE.id_to_ref_map = {};
+Module.STDWEB_PRIVATE.id_to_refcount_map = {};
+Module.STDWEB_PRIVATE.ref_to_id_map = new WeakMap();
+Module.STDWEB_PRIVATE.last_refid = 1;
+
+Module.STDWEB_PRIVATE.id_to_raw_value_map = {};
+Module.STDWEB_PRIVATE.last_raw_value_id = 1;
 
 Module.STDWEB_PRIVATE.acquire_rust_reference = function( reference ) {
     if( reference === undefined || reference === null ) {
         return 0;
     }
 
-    var refid = ref_to_id_map.get( reference );
+    var refid = Module.STDWEB_PRIVATE.ref_to_id_map.get( reference );
     if( refid === undefined ) {
-        refid = ref_to_id_symbol_map[ reference ];
-    }
-
-    if( refid === undefined ) {
-        refid = last_refid++;
-        if( typeof reference === "symbol" ) {
-            ref_to_id_symbol_map[ reference ] = refid;
-        } else {
-            ref_to_id_map.set( reference, refid );
-        }
-        id_to_ref_map[ refid ] = reference;
-        id_to_refcount_map[ refid ] = 1;
+        refid = Module.STDWEB_PRIVATE.last_refid++;
+        Module.STDWEB_PRIVATE.ref_to_id_map.set( reference, refid );
+        Module.STDWEB_PRIVATE.id_to_ref_map[ refid ] = reference;
+        Module.STDWEB_PRIVATE.id_to_refcount_map[ refid ] = 1;
     } else {
-        id_to_refcount_map[ refid ]++;
+        Module.STDWEB_PRIVATE.id_to_refcount_map[ refid ]++;
     }
 
     return refid;
 };
 
 Module.STDWEB_PRIVATE.acquire_js_reference = function( refid ) {
-    return id_to_ref_map[ refid ];
+    return Module.STDWEB_PRIVATE.id_to_ref_map[ refid ];
 };
 
 Module.STDWEB_PRIVATE.increment_refcount = function( refid ) {
-    id_to_refcount_map[ refid ]++;
+    Module.STDWEB_PRIVATE.id_to_refcount_map[ refid ]++;
 };
 
 Module.STDWEB_PRIVATE.decrement_refcount = function( refid ) {
+    var id_to_refcount_map = Module.STDWEB_PRIVATE.id_to_refcount_map;
+    var id_to_ref_map = Module.STDWEB_PRIVATE.id_to_ref_map;
     id_to_refcount_map[ refid ]--;
     if( id_to_refcount_map[ refid ] === 0 ) {
         var reference = id_to_ref_map[ refid ];
         delete id_to_ref_map[ refid ];
         delete id_to_refcount_map[ refid ];
-        if( typeof reference === "symbol" ) {
-            delete ref_to_id_symbol_map[ reference ];
-        } else {
-            ref_to_id_map.delete( reference );
-        }
+        Module.STDWEB_PRIVATE.ref_to_id_map.delete( reference );
     }
 };
+
+Module.STDWEB_PRIVATE.register_raw_value = function( value ) {
+    var id = Module.STDWEB_PRIVATE.last_raw_value_id++;
+    Module.STDWEB_PRIVATE.id_to_raw_value_map[ id ] = value;
+    return id;
+};
+
+Module.STDWEB_PRIVATE.unregister_raw_value = function( id ) {
+    delete Module.STDWEB_PRIVATE.id_to_raw_value_map[ id ];
+};
+
+Module.STDWEB_PRIVATE.get_raw_value = function( id ) {
+    return Module.STDWEB_PRIVATE.id_to_raw_value_map[ id ];
+}
 
 Module.STDWEB_PRIVATE.alloc = function alloc( size ) {
     return Module.web_malloc( size );
@@ -416,23 +431,11 @@ Module.STDWEB_PRIVATE.acquire_tmp = function( dummy ) {
             "__extjs_80d6d56760c65e49b7be8b6b01c1ea861b046bf0": function($0) {
                 Module.STDWEB_PRIVATE.decrement_refcount( $0 );
             },
-            "__extjs_9f22d4ca7bc938409787341b7db181f8dd41e6df": function($0) {
-                Module.STDWEB_PRIVATE.increment_refcount( $0 );
-            },
-            "__extjs_20ad46df0c338e20bd94061cd656da90c3ba5ba5": function($0, $1) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). getContext ("2d");})());
-            },
-            "__extjs_050e3f8fd41b9411cfd3fd413ce036926ced0f94": function($0) {
-                return (Module.STDWEB_PRIVATE.acquire_js_reference( $0 ) instanceof CanvasRenderingContext2D) | 0;
-            },
             "__extjs_ee41f864457c794c278cdcafc28967ffbac29706": function($0, $1) {
                 $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1);})());
             },
-            "__extjs_690fa77630cde409b06b28d7cb33cf9d181b389e": function($0, $1) {
-                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);($0). height = ($1);
-            },
-            "__extjs_9b6375c037b486fe12587b716aff148f791f3e6a": function($0, $1) {
-                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);($0). width = ($1);
+            "__extjs_9f22d4ca7bc938409787341b7db181f8dd41e6df": function($0) {
+                Module.STDWEB_PRIVATE.increment_refcount( $0 );
             },
             "__extjs_dc2fd915bd92f9e9c6a3bd15174f1414eee3dbaf": function() {
                 console.error( 'Encountered a panic!' );
@@ -449,6 +452,21 @@ Module.STDWEB_PRIVATE.acquire_tmp = function( dummy ) {
             "__extjs_a8e1d9cfe0b41d7d61b849811ad1cfba32de989b": function($0, $1, $2) {
                 $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). createElement (($2));})());
             },
+            "__extjs_20ad46df0c338e20bd94061cd656da90c3ba5ba5": function($0, $1) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). getContext ("2d");})());
+            },
+            "__extjs_050e3f8fd41b9411cfd3fd413ce036926ced0f94": function($0) {
+                return (Module.STDWEB_PRIVATE.acquire_js_reference( $0 ) instanceof CanvasRenderingContext2D) | 0;
+            },
+            "__extjs_690fa77630cde409b06b28d7cb33cf9d181b389e": function($0, $1) {
+                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);($0). height = ($1);
+            },
+            "__extjs_9b6375c037b486fe12587b716aff148f791f3e6a": function($0, $1) {
+                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);($0). width = ($1);
+            },
+            "__extjs_db0226ae1bbecd407e9880ee28ddc70fc3322d9c": function($0) {
+                $0 = Module.STDWEB_PRIVATE.to_js($0);Module.STDWEB_PRIVATE.unregister_raw_value (($0));
+            },
             "__extjs_74d5764ddc102a8d3b6252116087a68f2db0c9d4": function($0) {
                 Module.STDWEB_PRIVATE.from_js($0, (function(){return window ;})());
             },
@@ -458,6 +476,12 @@ Module.STDWEB_PRIVATE.acquire_tmp = function( dummy ) {
             "__extjs_b89175ea08fb31e454018ddb54dd3fc2eb8465b6": function($0, $1, $2, $3) {
                 $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);($0). setTransform (1 , 0 , 0 , 1 , 0 , 0); ($1). fillText ("GAME OVER" , ($2), ($3));
             },
+            "__extjs_7c5535365a3df6a4cc1f59c4a957bfce1dbfb8ee": function($0, $1, $2, $3) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);Module.STDWEB_PRIVATE.from_js($0, (function(){var listener = ($1); ($2). addEventListener (($3), listener); return listener ;})());
+            },
+            "__extjs_be46082601410ad79cc753a1f76169475e7c6f74": function($0, $1, $2, $3) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);Module.STDWEB_PRIVATE.from_js($0, (function(){var callback = ($1); var request = ($2). requestAnimationFrame (callback); return {request : request , callback : callback , window : ($3)};})());
+            },
             "__extjs_6ce693459878698d92d56b499a1b2a5f6bb03b69": function($0) {
                 return (Module.STDWEB_PRIVATE.acquire_js_reference( $0 ) instanceof KeyboardEvent) | 0;
             },
@@ -466,12 +490,6 @@ Module.STDWEB_PRIVATE.acquire_tmp = function( dummy ) {
             },
             "__extjs_ff5103e6cc179d13b4c7a785bdce2708fd559fc0": function($0) {
                 Module.STDWEB_PRIVATE.tmp = Module.STDWEB_PRIVATE.to_js( $0 );
-            },
-            "__extjs_7c5535365a3df6a4cc1f59c4a957bfce1dbfb8ee": function($0, $1, $2, $3) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);Module.STDWEB_PRIVATE.from_js($0, (function(){var listener = ($1); ($2). addEventListener (($3), listener); return listener ;})());
-            },
-            "__extjs_be46082601410ad79cc753a1f76169475e7c6f74": function($0, $1, $2, $3) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);Module.STDWEB_PRIVATE.from_js($0, (function(){var callback = ($1); var request = ($2). requestAnimationFrame (callback); return {request : request , callback : callback , window : ($3)};})());
             },
             "__extjs_69920acb495ef5b5f2a2907f2b2109c50f25a632": function($0) {
                 return (Module.STDWEB_PRIVATE.acquire_js_reference( $0 ) instanceof HTMLCanvasElement) | 0;
