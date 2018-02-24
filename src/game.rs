@@ -191,23 +191,33 @@ fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
 
     let mut detected = true;
 
-    if left <= ball.x && ball.x <= right { // A
-        if ball.vy > 0. && ball.y <= top && ball.y + BALL_RADIUS >= bottom { // A₂
+    if ball.x >=left && ball.x <= right { // A
+        let ball_top = ball.y + BALL_RADIUS;
+        let ball_bottom = ball.y - BALL_RADIUS;
+
+        if ball_top >= bottom && ball_bottom <= top {
+            /* Наша реакция на столкновение зависит от направления подлёта.
+             * Выталкивать шар нужно в сторону подлёта, то есть против направления скорости
+             * (вообще нужно смотреть на предыдущее положение, но мы ограничимся скоростью)
+             */
+
+            // скорость положительная -> шар подлетал снизу вверх -> выталкиваем вниз.
+            if ball.vy > 0. {
+                ball.y = ball_bottom;
+            } else {
+                ball.y = ball_top;
+            }
             ball.vy = -ball.vy;
-            ball.y = bottom - BALL_RADIUS;
-        } else if ball.vy < 0. && ball.y >= bottom && ball.y - BALL_RADIUS <= top { // A₁
-            ball.vy = -ball.vy;
-            ball.y = top + BALL_RADIUS;
         } else {
             detected = false;
         }
-    } else if bottom <= ball.y && ball.y <= top { // B
-        if ball.vx > 0. && ball.x <= right && ball.x + BALL_RADIUS >= left { // B₁
+    } else if ball.y >= bottom && ball.y <= top { // B
+        let ball_right = ball.x + BALL_RADIUS;
+        let ball_left = ball.x - BALL_RADIUS;
+
+        if ball_right >= left && ball_left <= right {
+            ball.x = if ball.vx > 0. { ball_left } else { ball_right };
             ball.vx = -ball.vx;
-            ball.x = left - BALL_RADIUS;
-        } else if ball.vx < 0. && ball.x >= left && ball.x - BALL_RADIUS <= right { // B₂
-            ball.vx = -ball.vx;
-            ball.x = right + BALL_RADIUS;
         } else {
             detected = false;
         }
@@ -215,17 +225,16 @@ fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
         let bx = ball.x - block.x;
         let by = ball.y - block.y;
 
-        let abx = bx.abs();
-        let aby = by.abs();
+        // (right, top) corner
+        let corner_x = 0.5 * BLOCK_WIDTH;
+        let corner_y = 0.5 * BLOCK_HEIGHT;
 
-        let dx = 0.5 * BLOCK_WIDTH - abx;
-        let dy = 0.5 * BLOCK_HEIGHT - aby;
+        let dx = corner_x - bx.abs();
+        let dy = corner_y - by.abs();
 
-        let dist2 = dx * dx + dy * dy;
+        let dist2_corner_ball_center = dx * dx + dy * dy;
 
-        detected = dist2 < BALL_RADIUS * BALL_RADIUS;
-
-        if detected {
+        if dist2_corner_ball_center < BALL_RADIUS * BALL_RADIUS {
             let norm_x = (right - ball.x).abs() * bx.signum();
             let norm_y = (top - ball.y).abs() * by.signum();
 
@@ -233,6 +242,8 @@ fn collide_with_block(mut ball: Ball, block: &Block) -> (Ball, bool) {
 
             ball.vx = vx;
             ball.vy = vy;
+        } else {
+            detected = false;
         }
     }
 
