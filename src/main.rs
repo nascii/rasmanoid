@@ -10,8 +10,9 @@ use std::rc::Rc;
 use std::cell::RefCell;
 
 use stdweb::web;
+use stdweb::Reference;
 use stdweb::unstable::TryInto;
-use stdweb::web::{IParentNode, INode, IEventTarget, CanvasRenderingContext2d};
+use stdweb::web::{IParentNode, INode, IEventTarget};
 use stdweb::web::event::{KeyDownEvent, KeyUpEvent, IKeyboardEvent};
 use stdweb::web::html_element::CanvasElement;
 
@@ -30,7 +31,7 @@ struct EnvInner {
 
 type Env = Rc<RefCell<EnvInner>>;
 
-fn timer(state: State, ctx: CanvasRenderingContext2d, env: Env) {
+fn timer(state: State, ctx: Reference, env: Env) {
     let window = web::window();
 
     window.request_animation_frame(move |ts| {
@@ -98,11 +99,13 @@ fn main() {
     canvas.set_width(WIDTH as u32);
     canvas.set_height(HEIGHT as u32);
 
-    let ctx: CanvasRenderingContext2d = canvas.get_context().unwrap();
-
     js! {
-        @{canvas}.style = "border: 1px solid gray";
+        @{&canvas}.style = "border: 1px solid gray";
     }
+
+    let ctx: Reference = js!(
+        return @{canvas}.getContext("webgl");
+    ).try_into().unwrap();
 
     let mut maps = maps::generate_maps();
     let map = maps.swap_remove(1);
@@ -114,6 +117,8 @@ fn main() {
         right: false,
         timestamp: 0.,
     }));
+
+    game::prepare(&ctx, &state);
 
     timer(state, ctx, env.clone());
     keyboard(env);

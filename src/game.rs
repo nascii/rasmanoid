@@ -1,4 +1,10 @@
-use stdweb::web::{CanvasRenderingContext2d};
+use std::iter;
+use std::f64::consts::PI;
+
+use stdweb::{Reference, UnsafeTypedArray};
+use stdweb::web::{document, CanvasRenderingContext2d};
+use stdweb::web::html_element::CanvasElement;
+use stdweb::unstable::TryInto;
 
 use objects::*;
 use maps::{Map, WIDTH, HEIGHT};
@@ -8,6 +14,7 @@ pub struct State {
     bat: Bat,
     ball: Ball,
     status: Status,
+    buffer: Vec<f32>,   // [bat, ball, ...blocks]
 }
 
 enum Status {
@@ -18,20 +25,30 @@ enum Status {
 
 impl State {
     pub fn new(map: Map) -> State {
+        let block_count = map.len();
+        let mut buffer = vec![0.; 2 * 6 * (block_count + 2)];
+
+        let bat = Bat {
+            x: 0.5 * WIDTH,
+            v: 0.,
+        };
+
+        let ball = Ball {
+            // TODO: randomize the velocity.
+            x: 0.5 * WIDTH,
+            y: BAT_Y + 0.5 * BAT_HEIGHT + BALL_RADIUS,
+            vx: 0.,
+            vy: 0.,
+        };
+
+        fill_buffer(&mut buffer, &bat, &ball, &map);
+
         State {
             map,
-            bat: Bat {
-                x: 0.5 * WIDTH,
-                v: 0.,
-            },
-            ball: Ball {
-                // TODO: randomize the velocity.
-                x: 0.5 * WIDTH,
-                y: BAT_Y + 0.5 * BAT_HEIGHT + BALL_RADIUS,
-                vx: 0.,
-                vy: 0.,
-            },
+            bat,
+            ball,
             status: Status::NotStarted,
+            buffer,
         }
     }
 }
@@ -99,11 +116,16 @@ fn flying(state: State, input: Input) -> State {
     ball.x += ball.vx * input.dt;
     ball.y += ball.vy * input.dt;
 
+    let mut buffer = state.buffer;
+
+    fill_buffer(&mut buffer, &bat, &ball, &map);
+
     State {
         map,
         bat,
         ball,
         status: if failed { Status::Failed } else { state.status },
+        buffer,
     }
 }
 
@@ -258,48 +280,219 @@ fn reflect(pos: (f64, f64), norm: (f64, f64)) -> (f64, f64) {
     )
 }
 
+fn fill_buffer(buffer: &mut [f32], bat: &Bat, ball: &Ball, map: &Map) {
+    let mut it = buffer.chunks_mut(12);
+
+    fill_buffer_with_rect(it.next().unwrap(), bat.x, BAT_Y, 0.5 * BAT_WIDTH, 0.5 * BAT_HEIGHT);
+    fill_buffer_with_rect(it.next().unwrap(), ball.x, ball.y, BALL_RADIUS, BALL_RADIUS);
+
+    for (block, buf) in map.iter().zip(it) {
+        fill_buffer_with_rect(buf, block.x, block.y, 0.5 * BLOCK_WIDTH, 0.5 * BLOCK_HEIGHT);
+    }
+}
+
+fn fill_buffer_with_rect(buffer: &mut [f32], x: f64, y: f64, hw: f64, hh: f64) {
+    assert_eq!(buffer.len(), 12);
+
+    buffer[0] = (x - hw) as f32;
+    buffer[1] = (y + hh) as f32;
+    buffer[2] = (x - hw) as f32;
+    buffer[3] = (y - hh) as f32;
+    buffer[4] = (x + hw) as f32;
+    buffer[5] = (y + hh) as f32;
+    buffer[6] = (x - hw) as f32;
+    buffer[7] = (y - hh) as f32;
+    buffer[8] = (x + hw) as f32;
+    buffer[9] = (y + hh) as f32;
+    buffer[10] = (x + hw) as f32;
+    buffer[11] = (y - hh) as f32;
+}
+
+// PREPARE
+
+const TEX_COORDS: &[f32] = &[0., 0., 0., 1., 1., 0., 0., 1., 1., 0., 1., 1.];
+
+const PLACE_VERT: &str = include_str!("place.vert");
+const DRAW_FRAG: &str = include_str!("draw.frag");
+
+pub fn prepare(ctx: &Reference, state: &State) {
+    // Changle the viewport.
+    js! {
+        @{ctx}.viewport(0, 0, @{WIDTH}, @{HEIGHT});
+    }
+
+    // Compile shaders.
+    let prog: Reference = js! {
+        var gl = @{ctx};
+
+        var vertShader = gl.createShader(gl.VERTEX_SHADER);
+        gl.shaderSource(vertShader, @{PLACE_VERT});
+        gl.compileShader(vertShader);
+
+        var vertShaderErr = gl.getShaderInfoLog(vertShader);
+        if (vertShaderErr) console.error(vertShaderErr);
+
+        var fragShader = gl.createShader(gl.FRAGMENT_SHADER);
+        gl.shaderSource(fragShader, @{DRAW_FRAG});
+        gl.compileShader(fragShader);
+
+        var fragShaderErr = gl.getShaderInfoLog(fragShader);
+        if (fragShaderErr) console.error(fragShaderErr);
+
+        var program = gl.createProgram();
+        gl.attachShader(program, vertShader);
+        gl.attachShader(program, fragShader);
+        gl.linkProgram(program);
+        gl.useProgram(program);
+
+        var progErr = gl.getProgramInfoLog(program);
+        if (progErr) console.error(progErr);
+
+        // Wrap the program to avoid TypeError.
+        return [program];
+    }.try_into().unwrap();
+
+    // Setup a_tex_coords attribute.
+
+    let item_count = state.map.len() + 2;
+
+    let tex_coords_buf: Vec<_> = TEX_COORDS.iter().cycle().take(12 * item_count).collect();
+    assert_eq!(tex_coords_buf.len(), 12 * item_count);
+
+    js! {
+        var gl = @{ctx};
+
+        var texCoordsBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, texCoordsBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(@{tex_coords_buf}), gl.STATIC_DRAW);
+
+        var texCoordsVbo = gl.getAttribLocation(@{&prog}[0], "a_tex_coords");
+        gl.vertexAttribPointer(texCoordsVbo, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(texCoordsVbo);
+    }
+
+    // Setup a_tex_index attribute.
+
+    let mut tex_index_buf = vec![0., 0., 0., 0., 0., 0., 1., 1., 1., 1., 1., 1.];
+    tex_index_buf.extend(iter::repeat(0.).take(6 * (item_count - 2)));
+    assert_eq!(tex_index_buf.len(), 6 * item_count);
+
+    js! {
+        var gl = @{ctx};
+
+        var texIndexBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, texIndexBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(@{tex_index_buf}), gl.STATIC_DRAW);
+
+        var texIndexVbo = gl.getAttribLocation(@{&prog}[0], "a_tex_index");
+        gl.vertexAttribPointer(texIndexVbo, 1, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(texIndexVbo);
+    }
+
+    // Setup a_position attibute.
+    js! {
+        var gl = @{ctx};
+
+        var positionBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, positionBuf);
+
+        var positionVbo = gl.getAttribLocation(@{&prog}[0], "a_position");
+        gl.vertexAttribPointer(positionVbo, 2, gl.FLOAT, false, 0, 0);
+        gl.enableVertexAttribArray(positionVbo);
+    }
+
+    // Setup textures.
+
+    let rect_tex = generate_rect_texture();
+    let ball_tex = generate_ball_texture();
+
+    js! {
+        var gl = @{ctx};
+
+        var rectTex = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, rectTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, @{rect_tex}.canvas);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.uniform1i(gl.getUniformLocation(@{&prog}[0], "textures[0]"), 0);
+
+        var ballTex = gl.createTexture();
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, ballTex);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, @{ball_tex}.canvas);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+        gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+        gl.uniform1i(gl.getUniformLocation(@{&prog}[0], "textures[1]"), 1);
+    }
+
+    // Setup uniforms.
+
+    js! {
+        var gl = @{ctx};
+
+        gl.uniform2f(gl.getUniformLocation(@{&prog}[0], "u_shape"), @{WIDTH}, @{HEIGHT});
+    }
+
+    // Enable blending.
+
+    js! {
+        var gl = @{ctx};
+
+        gl.enable(gl.BLEND);
+        gl.blendFunc(gl.SRC_ALPHA, gl.DST_ALPHA);
+    }
+}
+
+fn generate_rect_texture() -> CanvasRenderingContext2d {
+    let ctx = create_draft_ctx(16, 16);
+
+    ctx.fill_rect(0., 0., 16., 16.);
+
+    ctx
+}
+
+fn generate_ball_texture() -> CanvasRenderingContext2d {
+    let size = 64;
+
+    let ctx = create_draft_ctx(size, size);
+
+    let c = 0.5 * size as f64;
+
+    ctx.begin_path();
+    ctx.arc(c, c, c - 4., 0., 2. * PI, false);
+    ctx.set_line_width(8.);
+    ctx.stroke();
+
+    ctx
+}
+
+fn create_draft_ctx(width: u32, height: u32) -> CanvasRenderingContext2d {
+    let canvas: CanvasElement = document().create_element("canvas").unwrap().try_into().unwrap();
+
+    canvas.set_width(width);
+    canvas.set_height(height);
+
+    canvas.get_context().unwrap()
+}
+
 // RENDER
 
-pub fn render(ctx: &CanvasRenderingContext2d, state: &State) {
-    let bat_x = state.bat.x - 0.5 * BAT_WIDTH;
-    let bat_y = BAT_Y - 0.5 * BAT_HEIGHT;
+pub fn render(ctx: &Reference, state: &State) {
+    let vertex_count = 6 * (state.map.len() + 2);
 
-    let Ball {x: ball_x, y: ball_y, ..} = state.ball;
+    let buffer = unsafe { UnsafeTypedArray::new(&state.buffer) };
 
     js! { @(no_return)
-        var c = @{ctx};
+        var gl = @{ctx};
 
-        // Normalize the coordinate system.
-        c.setTransform(1, 0, 0, -1, 0, @{HEIGHT});
-
-        // Clear the canvas.
-        c.clearRect(0, 0, @{WIDTH}, @{HEIGHT});
-
-        // Draw the bat.
-        c.fillRect(@{bat_x}, @{bat_y}, @{BAT_WIDTH}, @{BAT_HEIGHT});
-
-        // Draw the ball.
-        c.beginPath();
-        c.arc(@{ball_x}, @{ball_y}, @{BALL_RADIUS}, 0, 2 * Math.PI, false);
-        c.lineWidth = 2;
-        c.stroke();
-
-        // Draw blocks.
-        var blocks = @{&state.map};
-        var bw = @{BLOCK_WIDTH};
-        var bh = @{BLOCK_HEIGHT};
-
-        for (var i = 0; i < blocks.length; ++i)
-            c.fillRect(blocks[i].x - 0.5 * bw, blocks[i].y - 0.5 * bh, bw, bh);
+        gl.bufferData(gl.ARRAY_BUFFER, @{buffer}, gl.DYNAMIC_DRAW);
+        gl.drawArrays(gl.TRIANGLES, 0, @{vertex_count as u32});
     }
 
     if let Status::Failed = state.status {
-        let text_x = 0.2 * WIDTH;
-        let text_y = 0.5 * HEIGHT;
-
-        js! { @(no_return)
-            @{ctx}.setTransform(1, 0, 0, 1, 0, 0);
-            @{ctx}.fillText("GAME OVER", @{text_x}, @{text_y});
-        }
+        // TODO
     }
 }
