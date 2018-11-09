@@ -13,8 +13,42 @@ if( typeof Rust === "undefined" ) {
         Rust.rasmanoid = factory();
     }
 }( this, function() {
-    function __initialize( __wasm_module, __load_asynchronously ) {
-    const Module = {};
+    return (function( module_factory ) {
+        var instance = module_factory();
+
+        if( typeof window === "undefined" && typeof process === "object" ) {
+            var fs = require( "fs" );
+            var path = require( "path" );
+            var wasm_path = path.join( __dirname, "rasmanoid.wasm" );
+            var buffer = fs.readFileSync( wasm_path );
+            var mod = new WebAssembly.Module( buffer );
+            var wasm_instance = new WebAssembly.Instance( mod, instance.imports );
+            return instance.initialize( wasm_instance );
+        } else {
+            var file = fetch( "rasmanoid.wasm", {credentials: "same-origin"} );
+
+            var wasm_instance = ( typeof WebAssembly.instantiateStreaming === "function"
+                ? WebAssembly.instantiateStreaming( file, instance.imports )
+                    .then( function( result ) { return result.instance; } )
+
+                : file
+                    .then( function( response ) { return response.arrayBuffer(); } )
+                    .then( function( bytes ) { return WebAssembly.compile( bytes ); } )
+                    .then( function( mod ) { return WebAssembly.instantiate( mod, instance.imports ) } ) );
+
+            return wasm_instance
+                .then( function( wasm_instance ) {
+                    var exports = instance.initialize( wasm_instance );
+                    console.log( "Finished loading Rust wasm module 'rasmanoid'" );
+                    return exports;
+                })
+                .catch( function( error ) {
+                    console.log( "Error loading Rust wasm module 'rasmanoid':", error );
+                    throw error;
+                });
+        }
+    }( function() {
+    var Module = {};
 
     Module.STDWEB_PRIVATE = {};
 
@@ -80,7 +114,7 @@ Module.STDWEB_PRIVATE.to_js = function to_js( address ) {
     } else if( kind === 6 ) {
         return true;
     } else if( kind === 7 ) {
-        var pointer = HEAPU32[ address / 4 ];
+        var pointer = Module.STDWEB_PRIVATE.arena + HEAPU32[ address / 4 ];
         var length = HEAPU32[ (address + 4) / 4 ];
         var output = [];
         for( var i = 0; i < length; ++i ) {
@@ -88,9 +122,10 @@ Module.STDWEB_PRIVATE.to_js = function to_js( address ) {
         }
         return output;
     } else if( kind === 8 ) {
-        var value_array_pointer = HEAPU32[ address / 4 ];
+        var arena = Module.STDWEB_PRIVATE.arena;
+        var value_array_pointer = arena + HEAPU32[ address / 4 ];
         var length = HEAPU32[ (address + 4) / 4 ];
-        var key_array_pointer = HEAPU32[ (address + 8) / 4 ];
+        var key_array_pointer = arena + HEAPU32[ (address + 8) / 4 ];
         var output = {};
         for( var i = 0; i < length; ++i ) {
             var key_pointer = HEAPU32[ (key_array_pointer + i * 8) / 4 ];
@@ -102,61 +137,67 @@ Module.STDWEB_PRIVATE.to_js = function to_js( address ) {
         return output;
     } else if( kind === 9 ) {
         return Module.STDWEB_PRIVATE.acquire_js_reference( HEAP32[ address / 4 ] );
-    } else if( kind === 10 ) {
+    } else if( kind === 10 || kind === 12 || kind === 13 ) {
         var adapter_pointer = HEAPU32[ address / 4 ];
         var pointer = HEAPU32[ (address + 4) / 4 ];
         var deallocator_pointer = HEAPU32[ (address + 8) / 4 ];
+        var num_ongoing_calls = 0;
+        var drop_queued = false;
         var output = function() {
-            if( pointer === 0 ) {
-                throw new ReferenceError( "Already dropped Rust function called!" );
+            if( pointer === 0 || drop_queued === true ) {
+                if (kind === 10) {
+                    throw new ReferenceError( "Already dropped Rust function called!" );
+                } else if (kind === 12) {
+                    throw new ReferenceError( "Already dropped FnMut function called!" );
+                } else {
+                    throw new ReferenceError( "Already called or dropped FnOnce function called!" );
+                }
+            }
+
+            var function_pointer = pointer;
+            if (kind === 13) {
+                output.drop = Module.STDWEB_PRIVATE.noop;
+                pointer = 0;
+            }
+
+            if (num_ongoing_calls !== 0) {
+                if (kind === 12 || kind === 13) {
+                    throw new ReferenceError( "FnMut function called multiple times concurrently!" );
+                }
             }
 
             var args = Module.STDWEB_PRIVATE.alloc( 16 );
             Module.STDWEB_PRIVATE.serialize_array( args, arguments );
-            Module.STDWEB_PRIVATE.dyncall( "vii", adapter_pointer, [pointer, args] );
-            var result = Module.STDWEB_PRIVATE.tmp;
-            Module.STDWEB_PRIVATE.tmp = null;
+
+            try {
+                num_ongoing_calls += 1;
+                Module.STDWEB_PRIVATE.dyncall( "vii", adapter_pointer, [function_pointer, args] );
+                var result = Module.STDWEB_PRIVATE.tmp;
+                Module.STDWEB_PRIVATE.tmp = null;
+            } finally {
+                num_ongoing_calls -= 1;
+            }
+
+            if( drop_queued === true && num_ongoing_calls === 0 ) {
+                output.drop();
+            }
 
             return result;
         };
 
         output.drop = function() {
-            output.drop = Module.STDWEB_PRIVATE.noop;
-            var function_pointer = pointer;
-            pointer = 0;
-
-            Module.STDWEB_PRIVATE.dyncall( "vi", deallocator_pointer, [function_pointer] );
-        };
-
-        return output;
-    } else if( kind === 13 ) {
-        var adapter_pointer = HEAPU32[ address / 4 ];
-        var pointer = HEAPU32[ (address + 4) / 4 ];
-        var deallocator_pointer = HEAPU32[ (address + 8) / 4 ];
-        var output = function() {
-            if( pointer === 0 ) {
-                throw new ReferenceError( "Already called or dropped FnOnce function called!" );
+            if (num_ongoing_calls !== 0) {
+                drop_queued = true;
+                return;
             }
 
             output.drop = Module.STDWEB_PRIVATE.noop;
             var function_pointer = pointer;
             pointer = 0;
 
-            var args = Module.STDWEB_PRIVATE.alloc( 16 );
-            Module.STDWEB_PRIVATE.serialize_array( args, arguments );
-            Module.STDWEB_PRIVATE.dyncall( "vii", adapter_pointer, [function_pointer, args] );
-            var result = Module.STDWEB_PRIVATE.tmp;
-            Module.STDWEB_PRIVATE.tmp = null;
-
-            return result;
-        };
-
-        output.drop = function() {
-            output.drop = Module.STDWEB_PRIVATE.noop;
-            var function_pointer = pointer;
-            pointer = 0;
-
-            Module.STDWEB_PRIVATE.dyncall( "vi", deallocator_pointer, [function_pointer] );
+            if (function_pointer != 0) {
+                Module.STDWEB_PRIVATE.dyncall( "vi", deallocator_pointer, [function_pointer] );
+            }
         };
 
         return output;
@@ -308,6 +349,8 @@ Module.STDWEB_PRIVATE.to_js_string = function to_js_string( index, length ) {
 Module.STDWEB_PRIVATE.id_to_ref_map = {};
 Module.STDWEB_PRIVATE.id_to_refcount_map = {};
 Module.STDWEB_PRIVATE.ref_to_id_map = new WeakMap();
+// Not all types can be stored in a WeakMap
+Module.STDWEB_PRIVATE.ref_to_id_map_fallback = new Map();
 Module.STDWEB_PRIVATE.last_refid = 1;
 
 Module.STDWEB_PRIVATE.id_to_raw_value_map = {};
@@ -318,14 +361,29 @@ Module.STDWEB_PRIVATE.acquire_rust_reference = function( reference ) {
         return 0;
     }
 
-    var refid = Module.STDWEB_PRIVATE.ref_to_id_map.get( reference );
+    var id_to_refcount_map = Module.STDWEB_PRIVATE.id_to_refcount_map;
+    var id_to_ref_map = Module.STDWEB_PRIVATE.id_to_ref_map;
+    var ref_to_id_map = Module.STDWEB_PRIVATE.ref_to_id_map;
+    var ref_to_id_map_fallback = Module.STDWEB_PRIVATE.ref_to_id_map_fallback;
+
+    var refid = ref_to_id_map.get( reference );
+    if( refid === undefined ) {
+        refid = ref_to_id_map_fallback.get( reference );
+    }
     if( refid === undefined ) {
         refid = Module.STDWEB_PRIVATE.last_refid++;
-        Module.STDWEB_PRIVATE.ref_to_id_map.set( reference, refid );
-        Module.STDWEB_PRIVATE.id_to_ref_map[ refid ] = reference;
-        Module.STDWEB_PRIVATE.id_to_refcount_map[ refid ] = 1;
+        try {
+            ref_to_id_map.set( reference, refid );
+        } catch (e) {
+            ref_to_id_map_fallback.set( reference, refid );
+        }
+    }
+
+    if( refid in id_to_ref_map ) {
+        id_to_refcount_map[ refid ]++;
     } else {
-        Module.STDWEB_PRIVATE.id_to_refcount_map[ refid ]++;
+        id_to_ref_map[ refid ] = reference;
+        id_to_refcount_map[ refid ] = 1;
     }
 
     return refid;
@@ -341,13 +399,13 @@ Module.STDWEB_PRIVATE.increment_refcount = function( refid ) {
 
 Module.STDWEB_PRIVATE.decrement_refcount = function( refid ) {
     var id_to_refcount_map = Module.STDWEB_PRIVATE.id_to_refcount_map;
-    var id_to_ref_map = Module.STDWEB_PRIVATE.id_to_ref_map;
-    id_to_refcount_map[ refid ]--;
-    if( id_to_refcount_map[ refid ] === 0 ) {
+    if( 0 == --id_to_refcount_map[ refid ] ) {
+        var id_to_ref_map = Module.STDWEB_PRIVATE.id_to_ref_map;
+        var ref_to_id_map_fallback = Module.STDWEB_PRIVATE.ref_to_id_map_fallback;
         var reference = id_to_ref_map[ refid ];
         delete id_to_ref_map[ refid ];
         delete id_to_refcount_map[ refid ];
-        Module.STDWEB_PRIVATE.ref_to_id_map.delete( reference );
+        ref_to_id_map_fallback.delete(reference);
     }
 };
 
@@ -363,7 +421,7 @@ Module.STDWEB_PRIVATE.unregister_raw_value = function( id ) {
 
 Module.STDWEB_PRIVATE.get_raw_value = function( id ) {
     return Module.STDWEB_PRIVATE.id_to_raw_value_map[ id ];
-}
+};
 
 Module.STDWEB_PRIVATE.alloc = function alloc( size ) {
     return Module.web_malloc( size );
@@ -375,11 +433,11 @@ Module.STDWEB_PRIVATE.dyncall = function( signature, ptr, args ) {
 
 // This is based on code from Emscripten's preamble.js.
 Module.STDWEB_PRIVATE.utf8_len = function utf8_len( str ) {
-    let len = 0;
-    for( let i = 0; i < str.length; ++i ) {
+    var len = 0;
+    for( var i = 0; i < str.length; ++i ) {
         // Gotcha: charCodeAt returns a 16-bit word that is a UTF-16 encoded code unit, not a Unicode code point of the character! So decode UTF16->UTF32->UTF8.
         // See http://unicode.org/faq/utf_bom.html#utf16-3
-        let u = str.charCodeAt( i ); // possibly a lead surrogate
+        var u = str.charCodeAt( i ); // possibly a lead surrogate
         if( u >= 0xD800 && u <= 0xDFFF ) {
             u = 0x10000 + ((u & 0x3FF) << 10) | (str.charCodeAt( ++i ) & 0x3FF);
         }
@@ -415,150 +473,144 @@ Module.STDWEB_PRIVATE.acquire_tmp = function( dummy ) {
 
 
 
-    let HEAP8 = null;
-    let HEAP16 = null;
-    let HEAP32 = null;
-    let HEAPU8 = null;
-    let HEAPU16 = null;
-    let HEAPU32 = null;
-    let HEAPF32 = null;
-    let HEAPF64 = null;
+    var HEAP8 = null;
+    var HEAP16 = null;
+    var HEAP32 = null;
+    var HEAPU8 = null;
+    var HEAPU16 = null;
+    var HEAPU32 = null;
+    var HEAPF32 = null;
+    var HEAPF64 = null;
 
     Object.defineProperty( Module, 'exports', { value: {} } );
 
-    const __imports = {
-        env: {
-            "__extjs_80d6d56760c65e49b7be8b6b01c1ea861b046bf0": function($0) {
+    function __web_on_grow() {
+        var buffer = Module.instance.exports.memory.buffer;
+        HEAP8 = new Int8Array( buffer );
+        HEAP16 = new Int16Array( buffer );
+        HEAP32 = new Int32Array( buffer );
+        HEAPU8 = new Uint8Array( buffer );
+        HEAPU16 = new Uint16Array( buffer );
+        HEAPU32 = new Uint32Array( buffer );
+        HEAPF32 = new Float32Array( buffer );
+        HEAPF64 = new Float64Array( buffer );
+    }
+
+    return {
+        imports: {
+            env: {
+                "__extjs_80d6d56760c65e49b7be8b6b01c1ea861b046bf0": function($0) {
                 Module.STDWEB_PRIVATE.decrement_refcount( $0 );
-            },
-            "__extjs_ee41f864457c794c278cdcafc28967ffbac29706": function($0, $1) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1);})());
-            },
-            "__extjs_9f22d4ca7bc938409787341b7db181f8dd41e6df": function($0) {
-                Module.STDWEB_PRIVATE.increment_refcount( $0 );
-            },
-            "__extjs_dc2fd915bd92f9e9c6a3bd15174f1414eee3dbaf": function() {
-                console.error( 'Encountered a panic!' );
-            },
-            "__extjs_97495987af1720d8a9a923fa4683a7b683e3acd6": function($0, $1) {
-                console.error( 'Panic error message:', Module.STDWEB_PRIVATE.to_js_string( $0, $1 ) );
-            },
-            "__extjs_72fc447820458c720c68d0d8e078ede631edd723": function($0, $1, $2) {
-                console.error( 'Panic location:', Module.STDWEB_PRIVATE.to_js_string( $0, $1 ) + ':' + $2 );
-            },
-            "__extjs_1c8769c3b326d77ceb673ada3dc887cf1d509509": function($0) {
-                Module.STDWEB_PRIVATE.from_js($0, (function(){return document ;})());
-            },
-            "__extjs_a8e1d9cfe0b41d7d61b849811ad1cfba32de989b": function($0, $1, $2) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). createElement (($2));})());
-            },
-            "__extjs_20ad46df0c338e20bd94061cd656da90c3ba5ba5": function($0, $1) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). getContext ("2d");})());
-            },
-            "__extjs_050e3f8fd41b9411cfd3fd413ce036926ced0f94": function($0) {
-                return (Module.STDWEB_PRIVATE.acquire_js_reference( $0 ) instanceof CanvasRenderingContext2D) | 0;
-            },
-            "__extjs_690fa77630cde409b06b28d7cb33cf9d181b389e": function($0, $1) {
-                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);($0). height = ($1);
             },
             "__extjs_9b6375c037b486fe12587b716aff148f791f3e6a": function($0, $1) {
                 $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);($0). width = ($1);
             },
-            "__extjs_db0226ae1bbecd407e9880ee28ddc70fc3322d9c": function($0) {
-                $0 = Module.STDWEB_PRIVATE.to_js($0);Module.STDWEB_PRIVATE.unregister_raw_value (($0));
+            "__extjs_690fa77630cde409b06b28d7cb33cf9d181b389e": function($0, $1) {
+                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);($0). height = ($1);
+            },
+            "__extjs_a342681e5c1e3fb0bdeac6e35d67bf944fcd4102": function($0, $1) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). value ;})());
             },
             "__extjs_74d5764ddc102a8d3b6252116087a68f2db0c9d4": function($0) {
                 Module.STDWEB_PRIVATE.from_js($0, (function(){return window ;})());
             },
-            "__extjs_60b5905f6e9757671440cb96793c92112e86ffe1": function($0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) {
-                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);$4 = Module.STDWEB_PRIVATE.to_js($4);$5 = Module.STDWEB_PRIVATE.to_js($5);$6 = Module.STDWEB_PRIVATE.to_js($6);$7 = Module.STDWEB_PRIVATE.to_js($7);$8 = Module.STDWEB_PRIVATE.to_js($8);$9 = Module.STDWEB_PRIVATE.to_js($9);$10 = Module.STDWEB_PRIVATE.to_js($10);$11 = Module.STDWEB_PRIVATE.to_js($11);$12 = Module.STDWEB_PRIVATE.to_js($12);$13 = Module.STDWEB_PRIVATE.to_js($13);var c = ($0); c.setTransform (1 , 0 , 0 , - 1 , 0 , ($1)); c.clearRect (0 , 0 , ($2), ($3)); c.fillRect (($4), ($5), ($6), ($7)); c.beginPath (); c.arc (($8), ($9), ($10), 0 , 2 * Math.PI , false); c.lineWidth = 2 ; c.stroke (); var blocks = ($11); var bw = ($12); var bh = ($13); for (var i = 0 ; i < blocks.length ; ++i)c.fillRect (blocks [i]. x - 0.5 * bw , blocks [i]. y - 0.5 * bh , bw , bh);
+            "__extjs_72fc447820458c720c68d0d8e078ede631edd723": function($0, $1, $2) {
+                console.error( 'Panic location:', Module.STDWEB_PRIVATE.to_js_string( $0, $1 ) + ':' + $2 );
             },
-            "__extjs_b89175ea08fb31e454018ddb54dd3fc2eb8465b6": function($0, $1, $2, $3) {
-                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);($0). setTransform (1 , 0 , 0 , 1 , 0 , 0); ($1). fillText ("GAME OVER" , ($2), ($3));
+            "__extjs_a3b76c5b7916fd257ee3f362dc672b974e56c476": function($0, $1) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). success ;})());
             },
-            "__extjs_6ce693459878698d92d56b499a1b2a5f6bb03b69": function($0) {
-                return (Module.STDWEB_PRIVATE.acquire_js_reference( $0 ) instanceof KeyboardEvent) | 0;
-            },
-            "__extjs_7ad1b6d74ad09161e54cc3395928efc20ff7acaf": function($0, $1) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). key ;})());
-            },
-            "__extjs_ff5103e6cc179d13b4c7a785bdce2708fd559fc0": function($0) {
-                Module.STDWEB_PRIVATE.tmp = Module.STDWEB_PRIVATE.to_js( $0 );
-            },
-            "__extjs_7c5535365a3df6a4cc1f59c4a957bfce1dbfb8ee": function($0, $1, $2, $3) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);Module.STDWEB_PRIVATE.from_js($0, (function(){var listener = ($1); ($2). addEventListener (($3), listener); return listener ;})());
-            },
-            "__extjs_be46082601410ad79cc753a1f76169475e7c6f74": function($0, $1, $2, $3) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);Module.STDWEB_PRIVATE.from_js($0, (function(){var callback = ($1); var request = ($2). requestAnimationFrame (callback); return {request : request , callback : callback , window : ($3)};})());
-            },
-            "__extjs_69920acb495ef5b5f2a2907f2b2109c50f25a632": function($0) {
-                return (Module.STDWEB_PRIVATE.acquire_js_reference( $0 ) instanceof HTMLCanvasElement) | 0;
+            "__extjs_5ecfd7ee5cecc8be26c1e6e3c90ce666901b547c": function($0, $1) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). error ;})());
             },
             "__extjs_b8ca11ce68b0855c37416e63c733f63a127221b1": function($0, $1) {
                 $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){($1). style = "border: 1px solid gray" ;})());
             },
-            "__extjs_496ebd7b1bc0e6eebd7206e8bee7671ea3b8006f": function($0, $1, $2) {
-                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). querySelector (($2));})());
-            },
             "__extjs_4cc2b2ed53586a2bd32ca2206724307e82bb32ff": function($0, $1) {
                 $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);($0). appendChild (($1));
             },
-            "__web_on_grow": function() {
-                const buffer = Module.instance.exports.memory.buffer;
-                HEAP8 = new Int8Array( buffer );
-                HEAP16 = new Int16Array( buffer );
-                HEAP32 = new Int32Array( buffer );
-                HEAPU8 = new Uint8Array( buffer );
-                HEAPU16 = new Uint16Array( buffer );
-                HEAPU32 = new Uint32Array( buffer );
-                HEAPF32 = new Float32Array( buffer );
-                HEAPF64 = new Float64Array( buffer );
+            "__extjs_97495987af1720d8a9a923fa4683a7b683e3acd6": function($0, $1) {
+                console.error( 'Panic error message:', Module.STDWEB_PRIVATE.to_js_string( $0, $1 ) );
+            },
+            "__extjs_285aac3fba72d67cb459d37d4d21aa4fb62598ba": function($0) {
+                Module.STDWEB_PRIVATE.arena = $0;
+            },
+            "__extjs_76c1ee6b34a4c89a8e2052fb46de66eee5144608": function($0) {
+                var o = Module.STDWEB_PRIVATE.acquire_js_reference( $0 );return (o instanceof KeyboardEvent && o.type === "keyup") | 0;
+            },
+            "__extjs_b89175ea08fb31e454018ddb54dd3fc2eb8465b6": function($0, $1, $2, $3) {
+                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);($0). setTransform (1 , 0 , 0 , 1 , 0 , 0); ($1). fillText ("GAME OVER" , ($2), ($3));
+            },
+            "__extjs_60b5905f6e9757671440cb96793c92112e86ffe1": function($0, $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) {
+                $0 = Module.STDWEB_PRIVATE.to_js($0);$1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);$4 = Module.STDWEB_PRIVATE.to_js($4);$5 = Module.STDWEB_PRIVATE.to_js($5);$6 = Module.STDWEB_PRIVATE.to_js($6);$7 = Module.STDWEB_PRIVATE.to_js($7);$8 = Module.STDWEB_PRIVATE.to_js($8);$9 = Module.STDWEB_PRIVATE.to_js($9);$10 = Module.STDWEB_PRIVATE.to_js($10);$11 = Module.STDWEB_PRIVATE.to_js($11);$12 = Module.STDWEB_PRIVATE.to_js($12);$13 = Module.STDWEB_PRIVATE.to_js($13);var c = ($0); c.setTransform (1 , 0 , 0 , - 1 , 0 , ($1)); c.clearRect (0 , 0 , ($2), ($3)); c.fillRect (($4), ($5), ($6), ($7)); c.beginPath (); c.arc (($8), ($9), ($10), 0 , 2 * Math.PI , false); c.lineWidth = 2 ; c.stroke (); var blocks = ($11); var bw = ($12); var bh = ($13); for (var i = 0 ; i < blocks.length ; ++i)c.fillRect (blocks [i]. x - 0.5 * bw , blocks [i]. y - 0.5 * bh , bw , bh);
+            },
+            "__extjs_89611721005b3de331324f19bedec5df179862e4": function($0) {
+                var o = Module.STDWEB_PRIVATE.acquire_js_reference( $0 );return (o instanceof CanvasRenderingContext2D) | 0;
+            },
+            "__extjs_f167788c39e80562a6972017cda9ecd6bb91dba7": function($0, $1, $2) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);Module.STDWEB_PRIVATE.from_js($0, (function(){try {return {value : function (){return ($1). createElement (($2));}(), success : true};}catch (error){return {error : error , success : false};}})());
+            },
+            "__extjs_0e54fd9c163fcf648ce0a395fde4500fd167a40b": function($0) {
+                var r = Module.STDWEB_PRIVATE.acquire_js_reference( $0 );return (r instanceof DOMException) && (r.name === "InvalidCharacterError");
+            },
+            "__extjs_352943ae98b2eeb817e36305c3531d61c7e1a52b": function($0) {
+                var o = Module.STDWEB_PRIVATE.acquire_js_reference( $0 );return (o instanceof Element) | 0;
+            },
+            "__extjs_dc2fd915bd92f9e9c6a3bd15174f1414eee3dbaf": function() {
+                console.error( 'Encountered a panic!' );
+            },
+            "__extjs_9d64a695070c583ca1db88f92170810d90b0bb4c": function($0) {
+                var o = Module.STDWEB_PRIVATE.acquire_js_reference( $0 );return (o instanceof KeyboardEvent && o.type === "keydown") | 0;
+            },
+            "__extjs_ee41f864457c794c278cdcafc28967ffbac29706": function($0, $1) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1);})());
+            },
+            "__extjs_5984245de8b6ef88f693ba2383ebf3c2f9718c6c": function($0) {
+                var o = Module.STDWEB_PRIVATE.acquire_js_reference( $0 );return (o instanceof HTMLCanvasElement) | 0;
+            },
+            "__extjs_be46082601410ad79cc753a1f76169475e7c6f74": function($0, $1, $2, $3) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);Module.STDWEB_PRIVATE.from_js($0, (function(){var callback = ($1); var request = ($2). requestAnimationFrame (callback); return {request : request , callback : callback , window : ($3)};})());
+            },
+            "__extjs_7c5535365a3df6a4cc1f59c4a957bfce1dbfb8ee": function($0, $1, $2, $3) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);$3 = Module.STDWEB_PRIVATE.to_js($3);Module.STDWEB_PRIVATE.from_js($0, (function(){var listener = ($1); ($2). addEventListener (($3), listener); return listener ;})());
+            },
+            "__extjs_7ad1b6d74ad09161e54cc3395928efc20ff7acaf": function($0, $1) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). key ;})());
+            },
+            "__extjs_db0226ae1bbecd407e9880ee28ddc70fc3322d9c": function($0) {
+                $0 = Module.STDWEB_PRIVATE.to_js($0);Module.STDWEB_PRIVATE.unregister_raw_value (($0));
+            },
+            "__extjs_496ebd7b1bc0e6eebd7206e8bee7671ea3b8006f": function($0, $1, $2) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);$2 = Module.STDWEB_PRIVATE.to_js($2);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). querySelector (($2));})());
+            },
+            "__extjs_20ad46df0c338e20bd94061cd656da90c3ba5ba5": function($0, $1) {
+                $1 = Module.STDWEB_PRIVATE.to_js($1);Module.STDWEB_PRIVATE.from_js($0, (function(){return ($1). getContext ("2d");})());
+            },
+            "__extjs_ff5103e6cc179d13b4c7a785bdce2708fd559fc0": function($0) {
+                Module.STDWEB_PRIVATE.tmp = Module.STDWEB_PRIVATE.to_js( $0 );
+            },
+            "__extjs_1c8769c3b326d77ceb673ada3dc887cf1d509509": function($0) {
+                Module.STDWEB_PRIVATE.from_js($0, (function(){return document ;})());
+            },
+            "__extjs_9f22d4ca7bc938409787341b7db181f8dd41e6df": function($0) {
+                Module.STDWEB_PRIVATE.increment_refcount( $0 );
+            },
+                "__web_on_grow": __web_on_grow
             }
+        },
+        initialize: function( instance ) {
+            Object.defineProperty( Module, 'instance', { value: instance } );
+            Object.defineProperty( Module, 'web_malloc', { value: Module.instance.exports.__web_malloc } );
+            Object.defineProperty( Module, 'web_free', { value: Module.instance.exports.__web_free } );
+            Object.defineProperty( Module, 'web_table', { value: Module.instance.exports.__web_table } );
+
+            
+            __web_on_grow();
+            Module.instance.exports.main();
+
+            return Module.exports;
         }
     };
-
-    function __instantiate( instance ) {
-        Object.defineProperty( Module, 'instance', { value: instance } );
-        Object.defineProperty( Module, 'web_malloc', { value: Module.instance.exports.__web_malloc } );
-        Object.defineProperty( Module, 'web_free', { value: Module.instance.exports.__web_free } );
-        Object.defineProperty( Module, 'web_table', { value: Module.instance.exports.__web_table } );
-
-        
-        __imports.env.__web_on_grow();
-        Module.instance.exports.main();
-    }
-
-    if( __load_asynchronously ) {
-        return WebAssembly.instantiate( __wasm_module, __imports )
-            .then( instance => {
-                __instantiate( instance );
-                console.log( "Finished loading Rust wasm module 'rasmanoid'" );
-                return Module.exports;
-            })
-            .catch( error => {
-                console.log( "Error loading Rust wasm module 'rasmanoid':", error );
-                throw error;
-            });
-    } else {
-        const instance = new WebAssembly.Instance( __wasm_module, __imports );
-        __instantiate( instance );
-        return Module.exports;
-    }
 }
-
-
-    if( typeof window === "undefined" ) {
-        const fs = require( "fs" );
-        const path = require( "path" );
-        const wasm_path = path.join( __dirname, "rasmanoid.wasm" );
-        const buffer = fs.readFileSync( wasm_path );
-        const mod = new WebAssembly.Module( buffer );
-
-        return __initialize( mod, false );
-    } else {
-        return fetch( "rasmanoid.wasm" )
-            .then( response => response.arrayBuffer() )
-            .then( bytes => WebAssembly.compile( bytes ) )
-            .then( mod => __initialize( mod, true ) );
-    }
+ ));
 }));
